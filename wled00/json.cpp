@@ -257,6 +257,20 @@ bool deserializeState(JsonObject root, byte callMode, byte presetId)
     if (presetsModifiedTime == 0) presetsModifiedTime = timein;
   }
 
+  if (root["tpm2"]) {
+    const char *recording_path = root["tpm2"].as<const char *>();
+    size_t len = 0;
+
+    if (recording_path != nullptr) {
+      len = strlen(recording_path);
+      if (len > 0 && len < 128) {
+        loadRecording(recording_path);
+      } else {
+        DEBUG_PRINT("Provided TPM2 parameter empty/malformed");
+      }
+    }
+  }
+
   doReboot = root[F("rb")] | doReboot;
 
   realtimeOverride = root[F("lor")] | realtimeOverride;
@@ -494,15 +508,17 @@ void serializeInfo(JsonObject root)
   root["live"] = (bool)realtimeMode;
 
   switch (realtimeMode) {
-    case REALTIME_MODE_INACTIVE: root["lm"] = ""; break;
-    case REALTIME_MODE_GENERIC:  root["lm"] = ""; break;
-    case REALTIME_MODE_UDP:      root["lm"] = F("UDP"); break;
-    case REALTIME_MODE_HYPERION: root["lm"] = F("Hyperion"); break;
-    case REALTIME_MODE_E131:     root["lm"] = F("E1.31"); break;
-    case REALTIME_MODE_ADALIGHT: root["lm"] = F("USB Adalight/TPM2"); break;
-    case REALTIME_MODE_ARTNET:   root["lm"] = F("Art-Net"); break;
-    case REALTIME_MODE_TPM2NET:  root["lm"] = F("tpm2.net"); break;
-    case REALTIME_MODE_DDP:      root["lm"] = F("DDP"); break;
+    case REALTIME_MODE_INACTIVE:   root["lm"] = ""; break;
+    case REALTIME_MODE_GENERIC:    root["lm"] = ""; break;
+    case REALTIME_MODE_UDP:        root["lm"] = F("UDP"); break;
+    case REALTIME_MODE_HYPERION:   root["lm"] = F("Hyperion"); break;
+    case REALTIME_MODE_E131:       root["lm"] = F("E1.31"); break;
+    case REALTIME_MODE_ADALIGHT:   root["lm"] = F("USB Adalight/TPM2"); break;
+    case REALTIME_MODE_ARTNET:     root["lm"] = F("Art-Net"); break;
+    case REALTIME_MODE_TPM2NET:    root["lm"] = F("tpm2.net"); break;
+    case REALTIME_MODE_DDP:        root["lm"] = F("DDP"); break;
+    case REALTIME_MODE_TPM2RECORD: root["lm"] = F("TPM2 Recording (ROM)");
+    break;
   }
 
   if (realtimeIP[0] == 0)
