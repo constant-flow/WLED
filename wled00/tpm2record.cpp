@@ -1,6 +1,29 @@
 #include "wled.h"
 
-// reference spec: https://gist.github.com/jblang/89e24e2655be6c463c56
+// This adds TPM2-file storing and playback capabilities to WLED.
+// 
+// What does it mean:
+//   You can now store short recorded animations on the ESP32 (in the ROM: no SD required) with a connected LED stripe.
+//
+// How to transfer the animation:
+//   WLED offers a web file manager under <IP_OF_WLED>/edit here you can upload a recorded *.TPM2 file
+//
+// How to create a recording:
+//   You can record with tools like Jinx
+//
+// How to load the animation:
+//   You can specify a preset to playback this recording with the following API command
+//
+//   {"tpm2":"/record.tpm2"}
+//
+// How to trigger the animation:
+//   Presets can be triggered multiple interfaces e.g. via the json API, via the web interface or with a connected IR remote
+//
+// What next:
+//   - Playback from SD card is the next plan, here the length of the animation is less of a problem.
+//   - Playback and Recording of RGBW animations, as right now only RGB recordings are supported by WLED
+
+// reference spec of TPM2: https://gist.github.com/jblang/89e24e2655be6c463c56
 // - A packet contains any data of the TPM2 protocol, it
 //     starts with `TPM2_START` and ends with `TPM2_END`
 // - A frame contains the visual data (the LEDs color's) of one moment
