@@ -1,6 +1,11 @@
 #include "wled.h"
 
+#define USED_STORAGE_FILESYSTEMS "LittleFS"
+
+#ifdef WLED_USE_SD
+#define USED_STORAGE_FILESYSTEMS "SD, LittleFS"
 #include "SD_MMC.h"
+#endif
 
 // This adds TPM2-file storing and playback capabilities to WLED.
 // 
@@ -52,21 +57,16 @@ int32_t  recordingRepeats = RECORDING_REPEAT_LOOP;
 unsigned long lastFrame   = 0;
 
 // skips until a specific byte comes up
-void skipUntil(uint8_t byteToStopAt) {
+void skipUntil(uint8_t byteToStopAt)
+{
   uint8_t rb = 0;
   do { rb = recordingFile.read(); }
   while (recordingFile.available() && rb != byteToStopAt);
 }
 
-void skipUntilNextPacket() { skipUntil(TPM2_START); }
+void skipUntilNextPacket()  { skipUntil(TPM2_START); }
 
-void skipUntilEndOfPacket()
-{
-  uint8_t rb = 0;
-  do { rb = recordingFile.read(); } 
-  while (recordingFile.available() && rb != TPM2_END);
-  skipUntil(TPM2_END);
-}
+void skipUntilEndOfPacket() { skipUntil(TPM2_END); }
 
 void getNextColorData(uint8_t data[])
 {
@@ -124,7 +124,8 @@ void processUnknownData(uint8_t data)
   skipUntilNextPacket();
 }
 
-bool stopBecauseAtTheEnd() {
+bool stopBecauseAtTheEnd()
+{
   //If recording reached end loop or stop playback
   if (!recordingFile.available())
   {
@@ -184,7 +185,8 @@ void handlePlayRecording()
   playNextRecordingFrame();
 }
 
-void printWholeRecording() {
+void printWholeRecording()
+{
   while (recordingFile.available())
   {
     uint8_t rb = recordingFile.read();
@@ -207,6 +209,7 @@ void printWholeRecording() {
   recordingFile.close();
 }
 
+#ifdef WLED_USE_SD
 //checks if the file is available on SD card
 bool fileOnSD(const char *filepath)
 {
@@ -221,9 +224,11 @@ bool fileOnSD(const char *filepath)
 
   return false; // unknown card type
 }
+#endif
 
 //checks if the file is available on LittleFS
-bool fileOnFS(const char *filepath) {
+bool fileOnFS(const char *filepath)
+{
   return WLED_FS.exists(filepath);
 }
 
@@ -232,14 +237,17 @@ void loadRecording(const char *filepath)
   //close any potentially open file  
   if(recordingFile.available()) recordingFile.close();
 
+  #ifdef WLED_USE_SD
   if(fileOnSD(filepath)){
     DEBUG_PRINTF("Read file from SD: %s\n", filepath);
     recordingFile = SD_MMC.open(filepath, "rb");  
-  } else if(fileOnFS(filepath)) {
+  } else 
+  #endif
+  if(fileOnFS(filepath)) {
     DEBUG_PRINTF("Read file from FS: %s\n", filepath);
     recordingFile = WLED_FS.open(filepath, "rb");
   } else {
-    DEBUG_PRINTF("File %s not found (LittleFS, SD)\n", filepath);
+    DEBUG_PRINTF("File %s not found (%s)\n", filepath, USED_STORAGE_FILESYSTEMS);
     return;
   }
 
