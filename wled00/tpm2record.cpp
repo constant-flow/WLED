@@ -1,5 +1,7 @@
 #include "wled.h"
 
+#include "SD_MMC.h"
+
 // This adds TPM2-file storing and playback capabilities to WLED.
 // 
 // What does it mean:
@@ -205,14 +207,41 @@ void printWholeRecording() {
   recordingFile.close();
 }
 
-void loadRecording(const char *filepath)
+//checks if the file is available on SD card
+bool fileOnSD(const char *filepath)
 {
-  //close any potentially open file
+  if(!SD_MMC.begin()) return false; // mounting the card failed
+
+  uint8_t cardType = SD_MMC.cardType();
+  if(cardType == CARD_NONE) return false; // no SD card attached  
+  if(cardType == CARD_MMC || cardType == CARD_SD || cardType == CARD_SDHC)
+  {
+    return SD_MMC.exists(filepath);       
+  } 
+
+  return false; // unknown card type
+}
+
+//checks if the file is available on LittleFS
+bool fileOnFS(const char *filepath) {
+  return WLED_FS.exists(filepath);
+}
+
+void loadRecording(const char *filepath)
+{  
+  //close any potentially open file  
   if(recordingFile.available()) recordingFile.close();
 
-  recordingFile = WLED_FS.open(filepath, "rb");
-
-  printWholeRecording();
+  if(fileOnSD(filepath)){
+    DEBUG_PRINTF("Read file from SD: %s\n", filepath);
+    recordingFile = SD_MMC.open(filepath, "rb");  
+  } else if(fileOnFS(filepath)) {
+    DEBUG_PRINTF("Read file from FS: %s\n", filepath);
+    recordingFile = WLED_FS.open(filepath, "rb");
+  } else {
+    DEBUG_PRINTF("File %s not found (LittleFS, SD)\n", filepath);
+    return;
+  }
 
   if (realtimeOverride == REALTIME_OVERRIDE_ONCE)
   {
@@ -220,6 +249,5 @@ void loadRecording(const char *filepath)
   }
 
   recordingRepeats = RECORDING_REPEAT_DEFAULT;
-  recordingFile = WLED_FS.open(filepath, "rb");
   playNextRecordingFrame();
 }
