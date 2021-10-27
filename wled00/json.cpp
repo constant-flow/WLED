@@ -257,19 +257,26 @@ bool deserializeState(JsonObject root, byte callMode, byte presetId)
     if (presetsModifiedTime == 0) presetsModifiedTime = timein;
   }
 
-  if (root["tpm2"]) {
-    const char *recording_path = root["tpm2"].as<const char *>();
-    size_t len = 0;
+  JsonVariant tpm2Var = root["tpm2"];
+  if (tpm2Var.is<JsonObject>())
+  {
+    const char *recording_path = tpm2Var["file"].as<const char *>();
+    if(recording_path) {
+      int id = -1; 
 
-    if (recording_path != nullptr) {
-      len = strlen(recording_path);
-      if (len > 0 && len < 128) {
-        loadRecording(recording_path);
-      } else {
-        DEBUG_PRINT("Provided TPM2 parameter empty/malformed");
-      }
-    }
-  }
+      JsonVariant segVar = tpm2Var["seg"];
+      if(segVar) { // playback on segments
+        if     (segVar.is<JsonObject>() ) { id = segVar["id"] | -1; }  // passed as json object        
+        else if(segVar.is<JsonInteger>()) { id = segVar; }             // passed as integer        
+        else
+          DEBUG_PRINTLN("TPM2: 'seg' either as integer or as json with 'id':'integer'");
+        };         
+
+        WS2812FX::Segment sg = strip.getSegment(id);
+        loadRecording(recording_path, sg.start, sg.stop);             
+    } 
+  }    
+  
 
   doReboot = root[F("rb")] | doReboot;
 

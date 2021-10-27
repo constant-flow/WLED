@@ -194,7 +194,7 @@ int getNumVal(const String* req, uint16_t pos);
 bool updateVal(const String* req, const char* key, byte* val, byte minv=0, byte maxv=255);
 
 //tpm2record.cpp
-void loadRecording(const char *filepath);
+void loadRecording(const char *filepath, uint16_t startLed = -1, uint16_t stopLed = -1);
 void handlePlayRecording();
 
 //udp.cpp

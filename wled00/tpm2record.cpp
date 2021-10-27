@@ -1,10 +1,10 @@
 #include "wled.h"
 
-#define USED_STORAGE_FILESYSTEMS "LittleFS"
-
 #ifdef WLED_USE_SD
 #define USED_STORAGE_FILESYSTEMS "SD, LittleFS"
 #include "SD_MMC.h"
+#else
+#define USED_STORAGE_FILESYSTEMS "LittleFS"
 #endif
 
 // This adds TPM2-file storing and playback capabilities to WLED.
@@ -20,8 +20,11 @@
 //
 // How to load the animation:
 //   You can specify a preset to playback this recording with the following API command
+//   {"tpm2":{"file":"/record.tpm2"}}
 //
-//   {"tpm2":"/record.tpm2"}
+//   You can specify a preset to playback this recording on a specific segment
+//   {"tpm2":{"file":"/record.tpm2", "seg":{"id":2}}
+//   {"tpm2":{"file":"/record.tpm2", "seg":2}
 //
 // How to trigger the animation:
 //   Presets can be triggered multiple interfaces e.g. via the json API, via the web interface or with a connected IR remote
@@ -55,6 +58,8 @@ uint8_t  colorChannels    = 3;
 uint32_t msFrameDelay     = 33; // time between frames
 int32_t  recordingRepeats = RECORDING_REPEAT_LOOP;
 unsigned long lastFrame   = 0;
+uint16_t playbackLedStart = -1; // first led to play animation on
+uint16_t playbackLedStop  = -1; // led after the last led to play animation on
 
 // skips until a specific byte comes up
 void skipUntil(uint8_t byteToStopAt)
@@ -100,8 +105,9 @@ void processResponseData()
 void processFrameData()
 {
   uint16_t packetLength = getNextPacketLength(); // opt-TODO maybe stretch recording to available leds
+  uint16_t lastLed = min(playbackLedStop, uint16_t(playbackLedStart + packetLength));
 
-  for (uint16_t i = 0; i < packetLength / colorChannels; i++)
+  for (uint16_t i = playbackLedStart; i < lastLed; i++)
   {
     getNextColorData(colorData);
     setRealtimePixel(i, colorData[0], colorData[1], colorData[2], colorData[3]);
@@ -232,10 +238,22 @@ bool fileOnFS(const char *filepath)
   return WLED_FS.exists(filepath);
 }
 
-void loadRecording(const char *filepath)
+void loadRecording(const char *filepath, uint16_t startLed, uint16_t stopLed)
 {  
   //close any potentially open file  
   if(recordingFile.available()) recordingFile.close();
+
+  playbackLedStart = startLed;
+  playbackLedStop = stopLed;
+
+  // No start/stop defined
+  if(playbackLedStart == uint16_t(-1) || playbackLedStop == uint16_t(-1)) {
+    WS2812FX::Segment sg = strip.getSegment(-1);
+    playbackLedStart = sg.start;
+    playbackLedStop = sg.stop;
+  }
+
+  DEBUG_PRINTF("TPM2 load animation on LED %d to %d\n", playbackLedStart, playbackLedStop);         
 
   #ifdef WLED_USE_SD
   if(fileOnSD(filepath)){
