@@ -58,8 +58,8 @@ uint8_t  colorChannels    = 3;
 uint32_t msFrameDelay     = 33; // time between frames
 int32_t  recordingRepeats = RECORDING_REPEAT_LOOP;
 unsigned long lastFrame   = 0;
-uint16_t playbackLedStart = -1; // first led to play animation on
-uint16_t playbackLedStop  = -1; // led after the last led to play animation on
+uint16_t playbackLedStart = 0; // first led to play animation on
+uint16_t playbackLedStop  = 0; // led after the last led to play animation on
 
 // skips until a specific byte comes up
 void skipUntil(uint8_t byteToStopAt)
@@ -130,6 +130,15 @@ void processUnknownData(uint8_t data)
   skipUntilNextPacket();
 }
 
+void clearLastPlayback() { 
+
+  for (uint16_t i = playbackLedStart; i < playbackLedStop; i++)
+  {
+    getNextColorData(colorData);
+    setRealtimePixel(i, 0,0,0,0);
+  }
+}
+
 bool stopBecauseAtTheEnd()
 {
   //If recording reached end loop or stop playback
@@ -151,6 +160,7 @@ bool stopBecauseAtTheEnd()
       uint8_t mode = REALTIME_MODE_INACTIVE;
       realtimeLock(10, mode);
       recordingFile.close();
+      clearLastPlayback();
       return true;
     }
   }
@@ -241,7 +251,10 @@ bool fileOnFS(const char *filepath)
 void loadRecording(const char *filepath, uint16_t startLed, uint16_t stopLed)
 {  
   //close any potentially open file  
-  if(recordingFile.available()) recordingFile.close();
+  if(recordingFile.available()) {
+    clearLastPlayback();
+    recordingFile.close();
+  }
 
   playbackLedStart = startLed;
   playbackLedStop = stopLed;
