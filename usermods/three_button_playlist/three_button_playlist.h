@@ -6,6 +6,7 @@
  * This usermod allows to use three physical momentary buttons to skip forward and backward through a list of presets.
  * A Play buttons allows to retrigger the currently selected playlist item. 
  * The play button has only an effect for non-looping presets see: https://github.com/constant-flow/WLED/tree/tpm2-recording-playback
+ * A longpress on the play button will turn off the LEDs, any other press will turn them on again.
  * 
  * Prev button ID : Button id to switch to the previous preset (define buttons via `config -> LED pref-> Button X GPIO`)
  * Play button ID : Button id to switch to the next preset
@@ -23,37 +24,60 @@ private:
     uint8_t button_id_next;
     uint8_t playlist_length;
 
+    uint64_t playLastPressed;
+    bool alreadyToggled;
+
+    bool handlePlayLongPress(uint8_t button) {
+        if(button != button_id_play) return false;
+        if(!buttonPressedBefore[button]) return false;
+
+        if (millis() - playLastPressed > 1000 && !alreadyToggled){
+            alreadyToggled = true;
+            
+            toggleOnOff();
+            colorUpdated(CALL_MODE_BUTTON);
+            Serial.println("Three button Playlist: Toggle off");
+            return true;
+        }
+        return false;
+    }
+
 public:
     void setup()
     {
         Serial.println("Three button playlist: Prev, Play/Pause, Next");
+        alreadyToggled = false;
     }
 
     bool handleButton(uint8_t button)
     {
+        bool handledLongPress = handlePlayLongPress(button);
+        if(handledLongPress) return true;
+
         if (!isButtonPressed(button))
         {
             buttonPressedBefore[button] = false;
-            return false;
+            return true;
         }
+
         if (buttonPressedBefore[button])
-            return false;
+        {
+            return true;
+        }
 
         buttonPressedBefore[button] = true;
-        bool handled = false;
 
         if (button == button_id_prev)
         {
-            handled = true;
             selected_index--;
         };
         if (button == button_id_play)
         {
-            handled = true;
+            playLastPressed = millis();
+            alreadyToggled = false;
         };
         if (button == button_id_next)
         {
-            handled = true;
             selected_index++;
         };
 
@@ -64,7 +88,7 @@ public:
         Serial.println(selected_index + 1); //index in UI is 1 higher than internal index
         applyPreset(selected_index + 1);
         colorUpdated(CALL_MODE_BUTTON);
-        return handled;
+        return true; // other functions are conflicting. Take full ctrl over buttons.
     }
 
     void loop()
