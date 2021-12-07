@@ -104,6 +104,10 @@
 #include "../usermods/quinled-an-penta/quinled-an-penta.h"
 #endif
 
+#ifdef USERMOD_THREE_BUTTON_PLAYLIST
+#include "../usermods/three_button_playlist/three_button_playlist.h"
+#endif
+
 void registerUsermods()
 {
 /*
@@ -194,5 +198,9 @@ void registerUsermods()
 
   #ifdef QUINLED_AN_PENTA
   usermods.add(new QuinLEDAnPentaUsermod());
+  #endif
+
+  #ifdef USERMOD_THREE_BUTTON_PLAYLIST
+  usermods.add(new ThreeButtonPlaylist());
   #endif
 }
