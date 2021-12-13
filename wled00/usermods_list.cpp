@@ -108,6 +108,10 @@
 #include "../usermods/three_button_playlist/three_button_playlist.h"
 #endif
 
+#ifdef USERMOD_HID_I2C_TARGET
+#include "../usermods/hid-i2c-target/hid-i2c-target.h"
+#endif
+
 void registerUsermods()
 {
 /*
@@ -116,6 +120,10 @@ void registerUsermods()
    * \/ \/ \/
    */
   //usermods.add(new MyExampleUsermod());
+
+  #ifdef USERMOD_HID_I2C_TARGET
+  usermods.add(new HidI2cTarget());
+  #endif
 
   #ifdef USERMOD_BATTERY_STATUS_BASIC
   usermods.add(new UsermodBatteryBasic());
