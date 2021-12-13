@@ -1,3 +1,9 @@
+
+<div style="background-color:#000; color:#fff; padding: 1em;margin 1em;font-size:200%;border:4px white solid;">
+WLEXIBLE <a href="boards/wlexible/readme.md">Setup guide 🌎</a>
+</div>
+<hl>
+
 <p align="center">
   <img src="/images/wled_logo_akemi.png">
   <a href="https://github.com/Aircoookie/WLED/releases"><img src="https://img.shields.io/github/release/Aircoookie/WLED.svg?style=flat-square"></a>
