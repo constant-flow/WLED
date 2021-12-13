@@ -1,8 +1,8 @@
-# ━━━ WLEXIBLE: Custom board setup ━━━
+# ⚠️ WLEXIBLE: Custom board setup
 
-[Setup guide 🌎](userboards/wlexible/readme.md)
+[Setup guide for the Wlexible board](userboards/wlexible/readme.md)
 
-# ━━━ Original WLED readme ━━━
+# 
 
 <p align="center">
   <img src="/images/wled_logo_akemi.png">
