@@ -1,8 +1,8 @@
+# ━━━ WLEXIBLE: Custom board setup ━━━
 
-<div style="background-color:#000; color:#fff; padding: 1em;margin 1em;font-size:200%;border:4px white solid;">
-WLEXIBLE <a href="boards/wlexible/readme.md">Setup guide 🌎</a>
-</div>
-<hl>
+[Setup guide 🌎](userboards/wlexible/readme.md)
+
+# ━━━ Original WLED readme ━━━
 
 <p align="center">
   <img src="/images/wled_logo_akemi.png">
