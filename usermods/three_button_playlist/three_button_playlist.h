@@ -81,7 +81,7 @@ public:
             selected_index++;
         };
 
-        if (selected_index < 0) selected_index += playlist_length;
+        if (selected_index <= 0) selected_index += playlist_length;
         if (selected_index >= playlist_length) selected_index -= playlist_length;
 
         Serial.print("Three Button Playlist: Selected preset nr: ");
