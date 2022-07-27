@@ -140,12 +140,21 @@ public:
 //        ##       #### ######## ######## 
 
 // Recording format agnostic functions to load and skim thru a recording file
-   
-#ifdef WLED_USE_SD
-#define USED_STORAGE_FILESYSTEMS "SD, LittleFS"
-#include "SD_MMC.h"
+
+// SD connected via MMC 
+#ifdef WLED_USE_SD_MMC
+  #define USED_STORAGE_FILESYSTEMS "SD MMC, LittleFS"
+  #define SD_ADAPTER SD_MMC
+  #include "SD_MMC.h"
+// SD connected via SPI (adjustable via usermod config)
+#elif defined(WLED_USE_SD_SPI)
+  #define SD_ADAPTER SD
+  #define USED_STORAGE_FILESYSTEMS "SD SPI, LittleFS"
+  #include "SD.h"
+  #include "SPI.h"
+// no SD card support only use records from Flash (LittleFS)
 #else
-#define USED_STORAGE_FILESYSTEMS "LittleFS"
+  #define USED_STORAGE_FILESYSTEMS "LittleFS"
 #endif
 
 #define REALTIME_MODE_PLAYBACK REALTIME_MODE_GENERIC
@@ -166,17 +175,17 @@ uint32_t msFrameDelay     = 33; // time between frames
 int32_t  recordingRepeats = RECORDING_REPEAT_LOOP;
 unsigned long lastFrame   = 0;
 
-#ifdef WLED_USE_SD
+#ifdef SD_ADAPTER
 //checks if the file is available on SD card
 bool fileOnSD(const char *filepath)
 {
-  if(!SD_MMC.begin()) return false; // mounting the card failed
+  if(!SD_ADAPTER.begin()) return false; // mounting the card failed
 
-  uint8_t cardType = SD_MMC.cardType();
+  uint8_t cardType = SD_ADAPTER.cardType();
   if(cardType == CARD_NONE) return false; // no SD card attached  
   if(cardType == CARD_MMC || cardType == CARD_SD || cardType == CARD_SDHC)
   {
-    return SD_MMC.exists(filepath);       
+    return SD_ADAPTER.exists(filepath);       
   } 
 
   return false; // unknown card type
@@ -218,10 +227,10 @@ void loadRecording(const char *filepath, uint16_t startLed, uint16_t stopLed)
 
   DEBUG_PRINTF("Playback: Load animation on LED %d to %d\n", playbackLedStart, playbackLedStop);         
 
-  #ifdef WLED_USE_SD
+  #ifdef SD_ADAPTER
   if(fileOnSD(filepath)){
     DEBUG_PRINTF("Read file from SD: %s\n", filepath);
-    recordingFile = SD_MMC.open(filepath, "rb");  
+    recordingFile = SD_ADAPTER.open(filepath, "rb");  
   } else 
   #endif
   if(fileOnFS(filepath)) {

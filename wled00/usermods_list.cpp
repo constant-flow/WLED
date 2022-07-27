@@ -129,6 +129,14 @@
 #endif
 
 #ifdef USERMOD_PLAYBACK_RECORDINGS
+// This include of SD.h and SD_MMC.h must happen here, else they won't be
+// resolved correctly (when included in mod's header only)
+  #ifdef WLED_USE_SD_MMC
+    #include "SD_MMC.h"
+  #elif defined(WLED_USE_SD_SPI)    
+    #include "SD.h"
+    #include "SPI.h"
+  #endif
 #include "../usermods/playback_recordings/usermod_playback_recordings.h"
 #endif
 
