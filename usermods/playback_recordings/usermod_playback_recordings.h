@@ -53,6 +53,8 @@ void tpm2_playNextPlaybackFrame();
 // Default repeat count, when not specified by preset (-1=loop, 0=play once, 2=repeat two times)
 #define PLAYBACK_REPEAT_NEVER 0
 
+#define PLAYBACK_FRAME_DELAY 25
+
 #ifndef USED_STORAGE_FILESYSTEMS
   #define USED_STORAGE_FILESYSTEMS "LittleFS (SD_CARD mod not active)"
 #endif
@@ -70,6 +72,7 @@ enum PLAYBACK_FORMAT {
 enum PLAYBACK_FORMAT currentPlaybackFormat = PLAYBACK_FORMAT::FORMAT_UNKNOWN;
 
 int32_t playbackRepeats = PLAYBACK_REPEAT_LOOP;
+uint32_t msFrameDelay   = PLAYBACK_FRAME_DELAY; // time between frames
 static const String playback_formats[] = {"tpm2",/*, "fseq"*/"   "};
 
 
@@ -89,6 +92,7 @@ private:
   String jsonKeyPlaybackSegment = "seg";
   String jsonKeyPlaybackSegmentId = "id";
   String jsonKeyPlaybackRepeats = "repeat";
+  String jsonKeyFramesPerSecond = "fps";
   String formatTpm2 = "tpm2";
 
 public:
@@ -163,6 +167,20 @@ public:
       }
     }
 
+    //adjust the framerate if defined
+    msFrameDelay = PLAYBACK_FRAME_DELAY;
+    JsonVariant jsonPlaybackFps = jsonPlaybackEntry[jsonKeyFramesPerSecond];
+    if (jsonPlaybackFps) {
+      if(jsonPlaybackFps.is<JsonInteger>() || jsonPlaybackFps.is<JsonFloat>()) {
+        float fps = jsonPlaybackFps;
+        uint32_t newMsDelay = round(1000.f / fps);
+        DEBUG_PRINTF("[%s] framerate %d -> delay between frames: %d\n", _name, fps, newMsDelay);
+        msFrameDelay = newMsDelay;
+      } else {
+        DEBUG_PRINTF("[%s] %s either as integer or float, though delay will be in ms and integer always\n", _name, jsonKeyFramesPerSecond.c_str());
+      }
+    }
+
     // stop here if the format is unknown
     if(currentPlaybackFormat == PLAYBACK_FORMAT::FORMAT_UNKNOWN) {
       DEBUG_PRINTF("[%s] unknown format ... if you read that, you can code the format you need XD\n", _name);
@@ -200,7 +218,6 @@ uint16_t playbackLedStart = 0; // first led to play animation on
 uint16_t playbackLedStop  = 0; // led after the last led to play animation on
 uint8_t  colorData[4];
 uint8_t  colorChannels    = 3;
-uint32_t msFrameDelay     = 33; // time between frames
 unsigned long lastFrame   = 0;
 
 // clear the segment used by the playback
