@@ -128,7 +128,7 @@
 #include "../usermods/Si7021_MQTT_HA/usermod_si7021_mqtt_ha.h"
 #endif
 
-#ifdef USERMOD_PLAYBACK_RECORDINGS
+#if defined(WLED_USE_SD_MMC) || defined(WLED_USE_SD_SPI)
 // This include of SD.h and SD_MMC.h must happen here, else they won't be
 // resolved correctly (when included in mod's header only)
   #ifdef WLED_USE_SD_MMC
@@ -137,6 +137,10 @@
     #include "SD.h"
     #include "SPI.h"
   #endif
+  #include "../usermods/sd_card/usermod_sd_card.h"
+#endif
+
+#ifdef USERMOD_PLAYBACK_RECORDINGS
 #include "../usermods/playback_recordings/usermod_playback_recordings.h"
 #endif
 
@@ -254,6 +258,10 @@ void registerUsermods()
   
   #ifdef USERMOD_SI7021_MQTT_HA
   usermods.add(new Si7021_MQTT_HA());
+  #endif
+
+  #ifdef SD_ADAPTER
+  usermods.add(new UsermodSdCard());
   #endif
 
   #ifdef USERMOD_PLAYBACK_RECORDINGS

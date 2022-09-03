@@ -3,25 +3,14 @@
 #include "wled.h"
 
 // predefs
-void handlePlayRecording();
-void loadRecording(const char *filepath, uint16_t startLed, uint16_t stopLed);
-void playFrame();
+void file_handlePlayRecording();
+void file_loadRecording(const char *filepath, uint16_t startLed, uint16_t stopLed);
+void file_playFrame();
 void tpm2_playNextRecordingFrame();
 
-// SD connected via MMC / SPI
-#ifdef WLED_USE_SD_MMC
-  #define USED_STORAGE_FILESYSTEMS "SD MMC, LittleFS"
-  #define SD_ADAPTER SD_MMC
-  #include "SD_MMC.h"
-// SD connected via SPI (adjustable via usermod config)
-#elif defined(WLED_USE_SD_SPI)
-  #define SD_ADAPTER SD
-  #define USED_STORAGE_FILESYSTEMS "SD SPI, LittleFS"
-  #include "SD.h"
-  #include "SPI.h"
-// no SD card support only use records from Flash (LittleFS)
-#else
-  #define USED_STORAGE_FILESYSTEMS "LittleFS"
+
+#ifndef USED_STORAGE_FILESYSTEMS
+  #define USED_STORAGE_FILESYSTEMS "LittleFS (SD_CARD mod not active)"
 #endif
 
 
@@ -72,12 +61,6 @@ enum PLAYBACK_FORMAT {
 enum PLAYBACK_FORMAT currentPlaybackFormat = PLAYBACK_FORMAT::FORMAT_UNKNOWN;
 
 static const String playback_formats[] = {"tpm2", "fseq","   "};
-
-
-#ifdef WLED_USE_SD_MMC   
-#elif defined(WLED_USE_SD_SPI)        
-  SPIClass spiPort = SPIClass(VSPI);  
-#endif
 class PlaybackRecordings : public Usermod
 {
 private:
@@ -87,108 +70,40 @@ private:
   String jsonKeyPlaybackSegmentId = "id";
   String formatTpm2 = "tpm2";
 
-  String recordingFileToLoad = "";
-
-  #ifdef WLED_USE_SD_SPI
-  int8_t configPinSourceSelect = 15;
-  int8_t configPinSourceClock = 14;
-  int8_t configPinMiso = 12;
-  int8_t configPinMosi = 13;
-
-  bool sdInitDone = false;
-
-  //acquired and initialize the SPI port
-  void init_SD_SPI()
-  {
-    PinManagerPinType pins[5] = { 
-       { configPinSourceSelect, true },
-       { configPinSourceClock, true },
-       { configPinMiso, true },
-       { configPinMosi, true }
-    };
-
-    if (!pinManager.allocateMultiplePins(pins, 4, PinOwner::UM_PlaybackRecordings)) {
-        DEBUG_PRINTF("[%s] SD (SPI) pin allocation failed!\n", _name);
-        sdInitDone = false;
-        return;
-      }
-      
-      bool returnOfInitSD = false;
-
-      #ifdef WLED_USE_SD_MMC 
-        returnOfInitSD = SD_ADAPTER.begin();
-      #elif defined(WLED_USE_SD_SPI)        
-        spiPort.begin(configPinSourceClock, configPinMiso, configPinMosi, configPinSourceSelect);
-        returnOfInitSD = SD_ADAPTER.begin(configPinSourceSelect, spiPort);
-      #endif
-
-      if(!returnOfInitSD) {
-        DEBUG_PRINTF("[%s] SD (SPI) begin failed!\n", _name);
-      }
-
-      sdInitDone = true;
-  }
-
-  //deinitialize the acquired SPI port
-  void deinit_SD_SPI()
-  {    
-    if(!sdInitDone) return; 
-
-    SD_ADAPTER.end();
-     
-    DEBUG_PRINTF("[%s] deallocate pins!\n", _name);
-    pinManager.deallocatePin(configPinSourceSelect, PinOwner::UM_PlaybackRecordings);
-    pinManager.deallocatePin(configPinSourceClock,  PinOwner::UM_PlaybackRecordings);
-    pinManager.deallocatePin(configPinMiso,         PinOwner::UM_PlaybackRecordings);
-    pinManager.deallocatePin(configPinMosi,         PinOwner::UM_PlaybackRecordings);
-
-    sdInitDone = false;
-  }
-
-  // some SPI pin was changed, while SPI was initialized, reinit to new port
-  void reinit_SD_SPI()
-  {
-    deinit_SD_SPI();
-    init_SD_SPI();
-  }
-  #endif
-
 public:
-  static bool configSdEnabled;
   static const char _name[];
 
   void setup()
-  {    
-    DEBUG_PRINTF("[%s] usermod loaded (storage: %s)\n", _name, USED_STORAGE_FILESYSTEMS);
-
-    #ifdef WLED_USE_SD_SPI
-    if(configSdEnabled) {
-      init_SD_SPI();
-    }
-    #endif
+  { 
+    DEBUG_PRINTF("[%s] usermod loaded (storage: %s)\n", _name, USED_STORAGE_FILESYSTEMS); 
   }
 
   void loop()
   {
-    handlePlayRecording();
+    file_handlePlayRecording();
   }
 
   void readFromJsonState(JsonObject &root)
   {
     DEBUG_PRINTF("[%s] load json\n", _name);
-    recordingFileToLoad = root[jsonKeyRecording] | recordingFileToLoad;
 
+    // check if recording keyword is contained in API-command (json)
+    // when a preset is fired it's normal to receive first the preset-firing ("ps":"<nr>]","time":"<UTC>")
+    // followed by the specified API-Command of this preset
     JsonVariant jsonRecordingEntry = root[jsonKeyRecording];
     if (!jsonRecordingEntry.is<JsonObject>()) {
-      DEBUG_PRINTF("[%s] no json object / wrong format\n", _name);
+      String debugOut;
+      serializeJson(root, debugOut);
+      DEBUG_PRINTF("[%s] no '%s' key or wrong format: \"%s\"\n", _name, jsonKeyRecording.c_str(), debugOut.c_str());
       return;
     }
     
+    // check if a mandatory path to the playback file exists in the API-command
     const char *recording_path = jsonRecordingEntry[jsonKeyFilePath].as<const char *>();
     String pathToRecording = recording_path;
     if (!recording_path)
     {
-      DEBUG_PRINTF("[%s] 'recording_path' not defined\n", _name);
+      DEBUG_PRINTF("[%s] '%s' not defined\n", _name, jsonKeyFilePath.c_str());
       return;
     }
 
@@ -199,7 +114,7 @@ public:
     { // playback on segments
       if      (jsonPlaybackSegment.is<JsonObject>())  { id = jsonPlaybackSegment[jsonKeyPlaybackSegmentId] | -1; }
       else if (jsonPlaybackSegment.is<JsonInteger>()) { id = jsonPlaybackSegment; } 
-      else { DEBUG_PRINTF("[%s] 'seg' either as integer or as json with 'id':'integer'\n", _name);};       
+      else { DEBUG_PRINTF("[%s] '%s' either as integer or as json with 'id':'integer'\n", _name, jsonKeyPlaybackSegment.c_str());};       
     }
 
     // retrieve the recording format from the file extension    
@@ -210,13 +125,15 @@ public:
       }
     }
 
+    // stop here if the format is unknown
     if(currentPlaybackFormat == PLAYBACK_FORMAT::FORMAT_UNKNOWN) {
       DEBUG_PRINTF("[%s] unknown format ... if you read that, you can code the format you need XD\n", _name);      
       return;
     }
     
+    // load playback to defined segment on strip (file_loadRecording handles the different formats within (file_playFrame))
     WS2812FX::Segment sg = strip.getSegment(id);
-    loadRecording(recording_path, sg.start, sg.stop);
+    file_loadRecording(recording_path, sg.start, sg.stop);
     DEBUG_PRINTF("[%s] play recording\n", _name);      
   }
 
@@ -224,63 +141,9 @@ public:
   {
     return USERMOD_ID_PLAYBACK_RECORDINGS;
   }
-
-  void addToConfig(JsonObject& root)
-  {
-    #ifdef WLED_USE_SD_SPI
-    JsonObject top = root.createNestedObject(FPSTR(_name));
-    top["pinSourceSelect"] = configPinSourceSelect;
-    top["pinSourceClock"] = configPinSourceClock;
-    top["pinMiso"] = configPinMiso;
-    top["pinMosi"] = configPinMosi;
-    top["sdEnabled"] = configSdEnabled;
-    #endif
-  }
-
-  bool readFromConfig(JsonObject &root)
-  {
-    #ifdef WLED_USE_SD_SPI
-    JsonObject top = root[FPSTR(_name)];
-    if (top.isNull()) {
-      DEBUG_PRINTF("[%s] No config found. (Using defaults.)\n", _name);
-      return false;
-    }
-
-    uint8_t oldPinSourceSelect  = configPinSourceSelect;
-    uint8_t oldPinSourceClock = configPinSourceClock;
-    uint8_t oldPinMiso = configPinMiso;
-    uint8_t oldPinMosi = configPinMosi;
-    bool    oldSdEnabled = configSdEnabled;
-
-    getJsonValue(top["pinSourceSelect"], configPinSourceSelect);
-    getJsonValue(top["pinSourceClock"],  configPinSourceClock);
-    getJsonValue(top["pinMiso"],         configPinMiso);
-    getJsonValue(top["pinMosi"],         configPinMosi);
-    getJsonValue(top["sdEnabled"],       configSdEnabled);
-
-    if(configSdEnabled != oldSdEnabled) {
-      configSdEnabled ? init_SD_SPI() : deinit_SD_SPI();
-      DEBUG_PRINTF("[%s] SD card %s\n", _name, configSdEnabled ? "enabled" : "disabled");
-    }
-
-    if( configSdEnabled && (
-        oldPinSourceSelect  != configPinSourceClock ||
-        oldPinSourceClock   != configPinMiso        ||
-        oldPinMiso          != configPinMosi        ||
-        oldPinMosi          != configSdEnabled)
-      )
-    {
-      DEBUG_PRINTF("[%s] Init SD card\n", _name);
-      reinit_SD_SPI();
-    }
-    #endif
-
-    return true;  
-  }
 };
 
 const char PlaybackRecordings::_name[] PROGMEM = "Playback Recordings";
-bool PlaybackRecordings::configSdEnabled = false;
 
 
 //        ######## #### ##       ######## 
@@ -291,8 +154,10 @@ bool PlaybackRecordings::configSdEnabled = false;
 //        ##        ##  ##       ##       
 //        ##       #### ######## ######## 
 
-// Recording format agnostic functions to load and skim thru a recording file
+// Recording format agnostic functions to load and skim thru a 
+// recording/playback file and control its related entities
 
+//TODO: maybe add as custom RT_MODE in `const.h` and `json.cpp`
 #define REALTIME_MODE_PLAYBACK REALTIME_MODE_GENERIC
 
 // infinite loop of animation
@@ -311,31 +176,9 @@ uint32_t msFrameDelay     = 33; // time between frames
 int32_t  recordingRepeats = RECORDING_REPEAT_LOOP;
 unsigned long lastFrame   = 0;
 
-#ifdef SD_ADAPTER
-//checks if the file is available on SD card
-bool fileOnSD(const char *filepath)
-{
-  if(!PlaybackRecordings::configSdEnabled) return false;
 
-  uint8_t cardType = SD_ADAPTER.cardType();
-  if(cardType == CARD_NONE) return false; // no SD card attached  
-  if(cardType == CARD_MMC || cardType == CARD_SD || cardType == CARD_SDHC)
-  {
-    return SD_ADAPTER.exists(filepath);       
-  } 
-
-  return false; // unknown card type
-}
-#endif
-
-//checks if the file is available on LittleFS
-bool fileOnFS(const char *filepath)
-{
-  return WLED_FS.exists(filepath);
-}
-
-void clearLastPlayback() { 
-
+// clear the segment used by the playback
+void file_clearLastPlayback() { 
   for (uint16_t i = playbackLedStart; i < playbackLedStop; i++)
   {
     // tpm2_GetNextColorData(colorData);
@@ -343,11 +186,17 @@ void clearLastPlayback() {
   }
 }
 
-void loadRecording(const char *filepath, uint16_t startLed, uint16_t stopLed)
+//checks if the file is available on LittleFS
+bool file_onFS(const char *filepath)
+{
+  return WLED_FS.exists(filepath);
+}
+
+void file_loadRecording(const char *filepath, uint16_t startLed, uint16_t stopLed)
 {  
   //close any potentially open file  
   if(recordingFile.available()) {
-    clearLastPlayback();
+    file_clearLastPlayback();
     recordingFile.close();
   }
 
@@ -357,19 +206,20 @@ void loadRecording(const char *filepath, uint16_t startLed, uint16_t stopLed)
   // No start/stop defined
   if(playbackLedStart == uint16_t(-1) || playbackLedStop == uint16_t(-1)) {
     WS2812FX::Segment sg = strip.getSegment(-1);
+    
     playbackLedStart = sg.start;
     playbackLedStop = sg.stop;
   }
 
   DEBUG_PRINTF("[%s] Load animation on LED %d to %d\n", PlaybackRecordings::_name, playbackLedStart, playbackLedStop);         
 
-  #ifdef SD_ADAPTER
-  if(fileOnSD(filepath)){
+  #ifdef SD_ADAPTER  
+  if(file_onSD(filepath)){
     DEBUG_PRINTF("[%s] Read file from SD: %s\n", PlaybackRecordings::_name, filepath);
     recordingFile = SD_ADAPTER.open(filepath, "rb");  
   } else 
   #endif
-  if(fileOnFS(filepath)) {
+  if(file_onFS(filepath)) {
     DEBUG_PRINTF("[%s] Read file from FS: %s\n", PlaybackRecordings::_name, filepath);
     recordingFile = WLED_FS.open(filepath, "rb");
   } else {
@@ -383,18 +233,18 @@ void loadRecording(const char *filepath, uint16_t startLed, uint16_t stopLed)
   }
 
   recordingRepeats = RECORDING_REPEAT_DEFAULT;
-  playFrame();
+  file_playFrame();
 }
 
 // skips until a specific byte comes up
-void skipUntil(uint8_t byteToStopAt)
+void file_skipUntil(uint8_t byteToStopAt)
 {
   uint8_t rb = 0;
   do { rb = recordingFile.read(); }
   while (recordingFile.available() && rb != byteToStopAt);
 }
 
-bool stopBecauseAtTheEnd()
+bool file_stopBecauseAtTheEnd()
 {
   //If recording reached end loop or stop playback
   if (!recordingFile.available())
@@ -413,7 +263,7 @@ bool stopBecauseAtTheEnd()
     {      
       exitRealtime();
       recordingFile.close();
-      clearLastPlayback();
+      file_clearLastPlayback();
       return true;
     }
   }
@@ -421,7 +271,7 @@ bool stopBecauseAtTheEnd()
   return false;
 }
 
-void playFrame() {
+void file_playFrame() {
   switch (currentPlaybackFormat)
   {
     case PLAYBACK_FORMAT::TPM2:  tpm2_playNextRecordingFrame(); break;
@@ -430,12 +280,12 @@ void playFrame() {
   }
 }
 
-void handlePlayRecording()
+void file_handlePlayRecording()
 {
   if (realtimeMode != REALTIME_MODE_PLAYBACK) return;
   if ( millis() - lastFrame < msFrameDelay)   return;
 
-  playFrame();
+  file_playFrame();
 }
 
 //      ######## ########  ##     ##  #######  
@@ -460,9 +310,9 @@ void handlePlayRecording()
 
 // --- Recording playback related ---
 
-void tpm2_SkipUntilNextPacket()  { skipUntil(TPM2_START); }
+void tpm2_SkipUntilNextPacket()  { file_skipUntil(TPM2_START); }
 
-void tpm2_SkipUntilEndOfPacket() { skipUntil(TPM2_END); }
+void tpm2_SkipUntilEndOfPacket() { file_skipUntil(TPM2_END); }
 
 void tpm2_GetNextColorData(uint8_t data[])
 {
@@ -487,9 +337,9 @@ void tpm2_processCommandData()
   tpm2_SkipUntilNextPacket();
 }
 
-void processResponseData()
+void tpm2_processResponseData()
 {
-  DEBUG_PRINTF("[%s] processResponseData: not implemented yet\n", PlaybackRecordings::_name);
+  DEBUG_PRINTF("[%s] tpm2_processResponseData: not implemented yet\n", PlaybackRecordings::_name);
   tpm2_SkipUntilNextPacket();
 }
 
@@ -522,7 +372,7 @@ void tpm2_processUnknownData(uint8_t data)
 // scan and forward until next frame was read (this will process commands)
 void tpm2_playNextRecordingFrame()
 {
-  if(stopBecauseAtTheEnd()) return;
+  if(file_stopBecauseAtTheEnd()) return;
 
   uint8_t rb = 0; // last read byte from file
 
@@ -536,7 +386,7 @@ void tpm2_playNextRecordingFrame()
   {
     rb = recordingFile.read();
     if     (rb == TPM2_COMMAND)    tpm2_processCommandData();     
-    else if(rb == TPM2_RESPONSE)   processResponseData();
+    else if(rb == TPM2_RESPONSE)   tpm2_processResponseData();
     else if(rb != TPM2_DATA_FRAME) tpm2_processUnknownData(rb);
     else {
       tpm2_processFrameData();
@@ -553,7 +403,7 @@ void tpm2_printWholeRecording()
 
     switch (rb)
     {
-    case 0xC9:
+    case TPM2_START:
       DEBUG_PRINTF("\n%02x ", rb);
       break;
     default:
