@@ -15,9 +15,9 @@
   #include "SPI.h"
 #endif
 
-#ifdef WLED_USE_SD_MMC   
-#elif defined(WLED_USE_SD_SPI)        
-  SPIClass spiPort = SPIClass(VSPI);  
+#ifdef WLED_USE_SD_MMC
+#elif defined(WLED_USE_SD_SPI)
+  SPIClass spiPort = SPIClass(VSPI);
 #endif
 
 class UsermodSdCard : public Usermod {
@@ -27,8 +27,8 @@ class UsermodSdCard : public Usermod {
     #ifdef WLED_USE_SD_SPI
       int8_t configPinSourceSelect = 16;
       int8_t configPinSourceClock = 14;
-      int8_t configPinMiso = 36;
-      int8_t configPinMosi = 15;      
+      int8_t configPinPoci = 36; // confusing names? Then have a look :)
+      int8_t configPinPico = 15; // https://www.oshwa.org/a-resolution-to-redefine-spi-signal-names/
 
       //acquired and initialize the SPI port
       void init_SD_SPI()
@@ -36,11 +36,11 @@ class UsermodSdCard : public Usermod {
         if(!configSdEnabled) return;
         if(sdInitDone) return;
 
-        PinManagerPinType pins[5] = { 
+        PinManagerPinType pins[5] = {
         { configPinSourceSelect, true },
         { configPinSourceClock, true },
-        { configPinMiso, false },
-        { configPinMosi, true }
+        { configPinPoci, false },
+        { configPinPico, true }
         };
 
         if (!pinManager.allocateMultiplePins(pins, 4, PinOwner::UM_PlaybackRecordings)) {
@@ -48,11 +48,11 @@ class UsermodSdCard : public Usermod {
             sdInitDone = false;
             return;
         }
-        
+
         bool returnOfInitSD = false;
 
-        #if defined(WLED_USE_SD_SPI)        
-          spiPort.begin(configPinSourceClock, configPinMiso, configPinMosi, configPinSourceSelect);
+        #if defined(WLED_USE_SD_SPI)
+          spiPort.begin(configPinSourceClock, configPinPoci, configPinPico, configPinSourceSelect);
           returnOfInitSD = SD_ADAPTER.begin(configPinSourceSelect, spiPort);
         #endif
 
@@ -67,16 +67,16 @@ class UsermodSdCard : public Usermod {
 
       //deinitialize the acquired SPI port
       void deinit_SD_SPI()
-      {    
-        if(!sdInitDone) return; 
+      {
+        if(!sdInitDone) return;
 
         SD_ADAPTER.end();
-        
+
         DEBUG_PRINTF("[%s] deallocate pins!\n", _name);
         pinManager.deallocatePin(configPinSourceSelect, PinOwner::UM_PlaybackRecordings);
         pinManager.deallocatePin(configPinSourceClock,  PinOwner::UM_PlaybackRecordings);
-        pinManager.deallocatePin(configPinMiso,         PinOwner::UM_PlaybackRecordings);
-        pinManager.deallocatePin(configPinMosi,         PinOwner::UM_PlaybackRecordings);
+        pinManager.deallocatePin(configPinPoci,         PinOwner::UM_PlaybackRecordings);
+        pinManager.deallocatePin(configPinPico,         PinOwner::UM_PlaybackRecordings);
 
         sdInitDone = false;
       }
@@ -105,7 +105,7 @@ class UsermodSdCard : public Usermod {
         sdInitDone = true;
       }
     #endif
-    
+
   public:
     static bool configSdEnabled;
     static const char _name[];
@@ -113,7 +113,7 @@ class UsermodSdCard : public Usermod {
     void setup() {
       DEBUG_PRINTF("[%s] usermod loaded \n", _name);
       #if defined(WLED_USE_SD_SPI)
-        init_SD_SPI();        
+        init_SD_SPI();
       #elif defined(WLED_USE_SD_MMC)
         init_SD_MMC();
       #endif
@@ -124,18 +124,14 @@ class UsermodSdCard : public Usermod {
       return USERMOD_ID_SD_CARD;
     }
 
-    void loop() {
-      
-    }
-
     void addToConfig(JsonObject& root)
     {
       #ifdef WLED_USE_SD_SPI
       JsonObject top = root.createNestedObject(FPSTR(_name));
       top["pinSourceSelect"] = configPinSourceSelect;
       top["pinSourceClock"] = configPinSourceClock;
-      top["pinMiso"] = configPinMiso;
-      top["pinMosi"] = configPinMosi;
+      top["pinPoci"] = configPinPoci;
+      top["pinPico"] = configPinPico;
       top["sdEnabled"] = configSdEnabled;
       #endif
     }
@@ -151,14 +147,14 @@ class UsermodSdCard : public Usermod {
 
         uint8_t oldPinSourceSelect  = configPinSourceSelect;
         uint8_t oldPinSourceClock = configPinSourceClock;
-        uint8_t oldPinMiso = configPinMiso;
-        uint8_t oldPinMosi = configPinMosi;
+        uint8_t oldPinPoci = configPinPoci;
+        uint8_t oldPinPico = configPinPico;
         bool    oldSdEnabled = configSdEnabled;
 
         getJsonValue(top["pinSourceSelect"], configPinSourceSelect);
         getJsonValue(top["pinSourceClock"],  configPinSourceClock);
-        getJsonValue(top["pinMiso"],         configPinMiso);
-        getJsonValue(top["pinMosi"],         configPinMosi);
+        getJsonValue(top["pinPoci"],         configPinPoci);
+        getJsonValue(top["pinPico"],         configPinPico);
         getJsonValue(top["sdEnabled"],       configSdEnabled);
 
         if(configSdEnabled != oldSdEnabled) {
@@ -169,22 +165,22 @@ class UsermodSdCard : public Usermod {
         if( configSdEnabled && (
             oldPinSourceSelect  != configPinSourceSelect ||
             oldPinSourceClock   != configPinSourceClock  ||
-            oldPinMiso          != configPinMiso         ||
-            oldPinMosi          != configPinMosi)
+            oldPinPoci          != configPinPoci         ||
+            oldPinPico          != configPinPico)
           )
         {
           DEBUG_PRINTF("[%s] Init SD card based of config\n", _name);
-          DEBUG_PRINTF("[%s] Config changes \n - SS: %d -> %d\n - MI: %d -> %d\n - MO: %d -> %d\n - En: %d -> %d\n", _name, oldPinSourceSelect, configPinSourceSelect, oldPinSourceClock, configPinSourceClock, oldPinMiso, configPinMiso, oldPinMosi, configPinMosi);
-          reinit_SD_SPI();          
+          DEBUG_PRINTF("[%s] Config changes \n - SS: %d -> %d\n - MI: %d -> %d\n - MO: %d -> %d\n - En: %d -> %d\n", _name, oldPinSourceSelect, configPinSourceSelect, oldPinSourceClock, configPinSourceClock, oldPinPoci, configPinPoci, oldPinPico, configPinPico);
+          reinit_SD_SPI();
         }
       #endif
 
-      return true;  
+      return true;
     }
 };
 
 const char UsermodSdCard::_name[] PROGMEM = "SD Card";
-bool UsermodSdCard::configSdEnabled = false;
+bool UsermodSdCard::configSdEnabled = true;
 
 #ifdef SD_ADAPTER
 //checks if the file is available on SD card
@@ -197,12 +193,12 @@ bool file_onSD(const char *filepath)
   uint8_t cardType = SD_ADAPTER.cardType();
   if(cardType == CARD_NONE) {
     DEBUG_PRINTF("[%s] not attached / cardType none\n", UsermodSdCard::_name);
-    return false; // no SD card attached 
+    return false; // no SD card attached
   }
   if(cardType == CARD_MMC || cardType == CARD_SD || cardType == CARD_SDHC)
   {
-    return SD_ADAPTER.exists(filepath);       
-  } 
+    return SD_ADAPTER.exists(filepath);
+  }
 
   return false; // unknown card type
 }

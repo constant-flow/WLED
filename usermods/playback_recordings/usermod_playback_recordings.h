@@ -2,37 +2,18 @@
 
 #include "wled.h"
 
-// predefs
-void file_handlePlayPlayback();
-void file_loadPlayback(const char *filepath, uint16_t startLed, uint16_t stopLed);
-void file_playFrame();
-void tpm2_playNextPlaybackFrame();
-
-
-#ifndef USED_STORAGE_FILESYSTEMS
-  #define USED_STORAGE_FILESYSTEMS "LittleFS (SD_CARD mod not active)"
-#endif
-
-
-//      ##     ##  ######  ######## ########  ##     ##  #######  ########  
-//      ##     ## ##    ## ##       ##     ## ###   ### ##     ## ##     ## 
-//      ##     ## ##       ##       ##     ## #### #### ##     ## ##     ## 
-//      ##     ##  ######  ######   ########  ## ### ## ##     ## ##     ## 
-//      ##     ##       ## ##       ##   ##   ##     ## ##     ## ##     ## 
-//      ##     ## ##    ## ##       ##    ##  ##     ## ##     ## ##     ## 
-//       #######   ######  ######## ##     ## ##     ##  #######  ########  
-
-
 // This usermod can play recorded animations
-// 
-// What formats are supported:
+//
+// What formats are supported (so far):
 //   - *.TPM2
 //
 // What does it mean:
-//   You can now store short recorded animations on the ESP32 (in the ROM: no SD required)
+//   You can now store short recorded animations on the ESP32 in the ROM.
+//   Bigger animations can be stored on a connected SD card if mod activated
 //
 // How to transfer the animation:
-//   WLED offers a web file manager under <IP_OF_WLED>/edit here you can upload a recorded file
+//   WLED offers a web file manager under <IP_OF_WLED>/edit here you can upload a recorded file to ROM
+//   WLED offers no web interface (yet) for SD upload, use your computer to move the animation there
 //
 // How to create a recording:
 //   You can record with tools like Jinx
@@ -40,6 +21,12 @@ void tpm2_playNextPlaybackFrame();
 // How to load the animation:
 //   You have to specify a preset to playback this recording with an API command
 //   {"playback":{"file":"/record.tpm2"}}
+//
+//   You can specify a preset to repeat this recording several times, e.g. 2
+//   {"playback":{"file":"/record.tpm2","repeat":2}}
+//
+//   You can specify a preset to repeat this recording forever
+//   {"playback":{"file":"/record.tpm2","repeat":true}}
 //
 //   You can specify a preset to playback this recording on a specific segment
 //   {"playback":{"file":"/record.tpm2","seg":2}}
@@ -51,8 +38,30 @@ void tpm2_playNextPlaybackFrame();
 // What next:
 //   - Playback and Recording of RGBW animations, as right now only RGB recordings are supported by WLED
 
+// PREDEFS
+
+void file_handlePlayPlayback();
+void file_loadPlayback(const char *filepath, uint16_t startLed, uint16_t stopLed);
+void file_playFrame();
+void tpm2_playNextPlaybackFrame();
+
+// MACROS
+
+// infinite loop of animation
+#define PLAYBACK_REPEAT_LOOP -1
+
+// Default repeat count, when not specified by preset (-1=loop, 0=play once, 2=repeat two times)
+#define PLAYBACK_REPEAT_NEVER 0
+
+#ifndef USED_STORAGE_FILESYSTEMS
+  #define USED_STORAGE_FILESYSTEMS "LittleFS (SD_CARD mod not active)"
+#endif
+
+//TODO: maybe add as custom RT_MODE in `const.h` and `json.cpp`
+#define REALTIME_MODE_PLAYBACK REALTIME_MODE_GENERIC
+
 enum PLAYBACK_FORMAT {
-  TPM2=0, 
+  TPM2=0,
   FSEQ,
   FORMAT_UNKNOWN,
   COUNT_PLAYBACK_FORMATS
@@ -60,7 +69,18 @@ enum PLAYBACK_FORMAT {
 
 enum PLAYBACK_FORMAT currentPlaybackFormat = PLAYBACK_FORMAT::FORMAT_UNKNOWN;
 
-static const String playback_formats[] = {"tpm2", "fseq","   "};
+int32_t playbackRepeats = PLAYBACK_REPEAT_LOOP;
+static const String playback_formats[] = {"tpm2",/*, "fseq"*/"   "};
+
+
+//      ##     ##  ######  ######## ########  ##     ##  #######  ########
+//      ##     ## ##    ## ##       ##     ## ###   ### ##     ## ##     ##
+//      ##     ## ##       ##       ##     ## #### #### ##     ## ##     ##
+//      ##     ##  ######  ######   ########  ## ### ## ##     ## ##     ##
+//      ##     ##       ## ##       ##   ##   ##     ## ##     ## ##     ##
+//      ##     ## ##    ## ##       ##    ##  ##     ## ##     ## ##     ##
+//       #######   ######  ######## ##     ## ##     ##  #######  ########
+
 class PlaybackRecordings : public Usermod
 {
 private:
@@ -68,14 +88,15 @@ private:
   String jsonKeyFilePath = "file";
   String jsonKeyPlaybackSegment = "seg";
   String jsonKeyPlaybackSegmentId = "id";
+  String jsonKeyPlaybackRepeats = "repeat";
   String formatTpm2 = "tpm2";
 
 public:
   static const char _name[];
 
   void setup()
-  { 
-    DEBUG_PRINTF("[%s] usermod loaded (storage: %s)\n", _name, USED_STORAGE_FILESYSTEMS); 
+  {
+    DEBUG_PRINTF("[%s] usermod loaded (storage: %s)\n", _name, USED_STORAGE_FILESYSTEMS);
   }
 
   void loop()
@@ -97,7 +118,7 @@ public:
       DEBUG_PRINTF("[%s] no '%s' key or wrong format: \"%s\"\n", _name, jsonKeyPlayback.c_str(), debugOut.c_str());
       return;
     }
-    
+
     // check if a mandatory path to the playback file exists in the API-command
     const char *playbackPath = jsonPlaybackEntry[jsonKeyFilePath].as<const char *>();
     String pathToPlayback = playbackPath;
@@ -113,11 +134,11 @@ public:
     if (jsonPlaybackSegment)
     { // playback on segments
       if      (jsonPlaybackSegment.is<JsonObject>())  { id = jsonPlaybackSegment[jsonKeyPlaybackSegmentId] | -1; }
-      else if (jsonPlaybackSegment.is<JsonInteger>()) { id = jsonPlaybackSegment; } 
-      else { DEBUG_PRINTF("[%s] '%s' either as integer or as json with 'id':'integer'\n", _name, jsonKeyPlaybackSegment.c_str());};       
+      else if (jsonPlaybackSegment.is<JsonInteger>()) { id = jsonPlaybackSegment; }
+      else { DEBUG_PRINTF("[%s] '%s' either as integer or as json with 'id':'integer'\n", _name, jsonKeyPlaybackSegment.c_str());};
     }
 
-    // retrieve the recording format from the file extension    
+    // retrieve the recording format from the file extension
     for(int i=0; i<PLAYBACK_FORMAT::COUNT_PLAYBACK_FORMATS; i++){
       if(pathToPlayback.endsWith(playback_formats[i])) {
         currentPlaybackFormat = (PLAYBACK_FORMAT) i;
@@ -125,16 +146,33 @@ public:
       }
     }
 
+    // check how often the playback should play
+    playbackRepeats = PLAYBACK_REPEAT_NEVER;
+    JsonVariant jsonPlaybackRepeats = jsonPlaybackEntry[jsonKeyPlaybackRepeats];
+    if (jsonPlaybackRepeats) {
+      if(jsonPlaybackRepeats.is<bool>()) {
+        bool doesLoop = jsonPlaybackRepeats;
+        DEBUG_PRINTF("[%s] repeats found as boolean: loop %d \n", _name, doesLoop);
+        playbackRepeats = doesLoop ? PLAYBACK_REPEAT_LOOP : PLAYBACK_REPEAT_NEVER;
+      } else if(jsonPlaybackRepeats.is<JsonInteger>()) {
+        int repeatCountInJson = jsonPlaybackRepeats;
+        DEBUG_PRINTF("[%s] repeats found as integer: repeat count %d\n", _name, repeatCountInJson);
+        playbackRepeats = repeatCountInJson;
+      } else {
+        DEBUG_PRINTF("[%s] %s either as true (loops forever) or as integer to specify count\n", _name, jsonKeyPlaybackRepeats.c_str());
+      }
+    }
+
     // stop here if the format is unknown
     if(currentPlaybackFormat == PLAYBACK_FORMAT::FORMAT_UNKNOWN) {
-      DEBUG_PRINTF("[%s] unknown format ... if you read that, you can code the format you need XD\n", _name);      
+      DEBUG_PRINTF("[%s] unknown format ... if you read that, you can code the format you need XD\n", _name);
       return;
     }
-    
+
     // load playback to defined segment on strip (file_loadPlayback handles the different formats within (file_playFrame))
     WS2812FX::Segment sg = strip.getSegment(id);
     file_loadPlayback(playbackPath, sg.start, sg.stop);
-    DEBUG_PRINTF("[%s] start playback\n", _name);      
+    DEBUG_PRINTF("[%s] start playback\n", _name);
   }
 
   uint16_t getId()
@@ -146,26 +184,16 @@ public:
 const char PlaybackRecordings::_name[] PROGMEM = "Playback Recordings";
 
 
-//        ######## #### ##       ######## 
-//        ##        ##  ##       ##       
-//        ##        ##  ##       ##       
-//        ######    ##  ##       ######   
-//        ##        ##  ##       ##       
-//        ##        ##  ##       ##       
-//        ##       #### ######## ######## 
+//        ######## #### ##       ########
+//        ##        ##  ##       ##
+//        ##        ##  ##       ##
+//        ######    ##  ##       ######
+//        ##        ##  ##       ##
+//        ##        ##  ##       ##
+//        ##       #### ######## ########
 
-// Recording format agnostic functions to load and skim thru a 
+// Recording format agnostic functions to load and skim thru a
 // recording/playback file and control its related entities
-
-//TODO: maybe add as custom RT_MODE in `const.h` and `json.cpp`
-#define REALTIME_MODE_PLAYBACK REALTIME_MODE_GENERIC
-
-// infinite loop of animation
-#define PLAYBACK_REPEAT_LOOP -1
-
-// Default repeat count, when not specified by preset (-1=loop, 0=play once, 2=repeat two times)
-#define PLAYBACK_REPEAT_DEFAULT 0
-
 
 File playbackFile;
 uint16_t playbackLedStart = 0; // first led to play animation on
@@ -173,11 +201,10 @@ uint16_t playbackLedStop  = 0; // led after the last led to play animation on
 uint8_t  colorData[4];
 uint8_t  colorChannels    = 3;
 uint32_t msFrameDelay     = 33; // time between frames
-int32_t  playbackRepeats = PLAYBACK_REPEAT_LOOP;
 unsigned long lastFrame   = 0;
 
 // clear the segment used by the playback
-void file_clearLastPlayback() { 
+void file_clearLastPlayback() {
   for (uint16_t i = playbackLedStart; i < playbackLedStop; i++)
   {
     // tpm2_GetNextColorData(colorData);
@@ -192,8 +219,8 @@ bool file_onFS(const char *filepath)
 }
 
 void file_loadPlayback(const char *filepath, uint16_t startLed, uint16_t stopLed)
-{  
-  //close any potentially open file  
+{
+  //close any potentially open file
   if(playbackFile.available()) {
     file_clearLastPlayback();
     playbackFile.close();
@@ -205,18 +232,18 @@ void file_loadPlayback(const char *filepath, uint16_t startLed, uint16_t stopLed
   // No start/stop defined
   if(playbackLedStart == uint16_t(-1) || playbackLedStop == uint16_t(-1)) {
     WS2812FX::Segment sg = strip.getSegment(-1);
-    
+
     playbackLedStart = sg.start;
     playbackLedStop = sg.stop;
   }
 
-  DEBUG_PRINTF("[%s] Load animation on LED %d to %d\n", PlaybackRecordings::_name, playbackLedStart, playbackLedStop);         
+  DEBUG_PRINTF("[%s] Load animation on LED %d to %d\n", PlaybackRecordings::_name, playbackLedStart, playbackLedStop);
 
-  #ifdef SD_ADAPTER  
+  #ifdef SD_ADAPTER
   if(file_onSD(filepath)){
     DEBUG_PRINTF("[%s] Read file from SD: %s\n", PlaybackRecordings::_name, filepath);
-    playbackFile = SD_ADAPTER.open(filepath, "rb");  
-  } else 
+    playbackFile = SD_ADAPTER.open(filepath, "rb");
+  } else
   #endif
   if(file_onFS(filepath)) {
     DEBUG_PRINTF("[%s] Read file from FS: %s\n", PlaybackRecordings::_name, filepath);
@@ -231,7 +258,6 @@ void file_loadPlayback(const char *filepath, uint16_t startLed, uint16_t stopLed
       realtimeOverride = REALTIME_OVERRIDE_NONE;
   }
 
-  playbackRepeats = PLAYBACK_REPEAT_DEFAULT;
   file_playFrame();
 }
 
@@ -256,11 +282,11 @@ bool file_stopBecauseAtTheEnd()
     {
       playbackFile.seek(0); // go back the beginning of the recording
       playbackRepeats--;
-      DEBUG_PRINTF("[%s] Repeat playback again for: %d\n", PlaybackRecordings::_name, playbackRepeats);  
+      DEBUG_PRINTF("[%s] Repeat playback again for: %d\n", PlaybackRecordings::_name, playbackRepeats);
     }
     else
-    {      
-      DEBUG_PRINTF("[%s] Stop playback\n", PlaybackRecordings::_name);  
+    {
+      DEBUG_PRINTF("[%s] Stop playback\n", PlaybackRecordings::_name);
       exitRealtime();
       playbackFile.close();
       file_clearLastPlayback();
@@ -288,13 +314,13 @@ void file_handlePlayPlayback()
   file_playFrame();
 }
 
-//      ######## ########  ##     ##  #######  
-//         ##    ##     ## ###   ### ##     ## 
-//         ##    ##     ## #### ####        ## 
-//         ##    ########  ## ### ##  #######  
-//         ##    ##        ##     ## ##        
-//         ##    ##        ##     ## ##        
-//         ##    ##        ##     ## ######### 
+//      ######## ########  ##     ##  #######
+//         ##    ##     ## ###   ### ##     ##
+//         ##    ##     ## #### ####        ##
+//         ##    ########  ## ### ##  #######
+//         ##    ##        ##     ## ##
+//         ##    ##        ##     ## ##
+//         ##    ##        ##     ## #########
 
 // reference spec of TPM2: https://gist.github.com/jblang/89e24e2655be6c463c56
 // - A packet contains any data of the TPM2 protocol, it
@@ -383,20 +409,20 @@ void tpm2_playNextPlaybackFrame()
   uint8_t rb = 0; // last read byte from file
 
   // scan to next TPM2 packet start, should be the first attempt
-  do { rb = playbackFile.read(); } 
-  while (playbackFile.available() && rb != TPM2_START);  
+  do { rb = playbackFile.read(); }
+  while (playbackFile.available() && rb != TPM2_START);
   if (!playbackFile.available()) { return; }
 
   // process everything until (including) the next frame data
   while(true)
   {
     rb = playbackFile.read();
-    if     (rb == TPM2_COMMAND)    tpm2_processCommandData();     
+    if     (rb == TPM2_COMMAND)    tpm2_processCommandData();
     else if(rb == TPM2_RESPONSE)   tpm2_processResponseData();
     else if(rb != TPM2_DATA_FRAME) tpm2_processUnknownData(rb);
     else {
       tpm2_processFrameData();
-      break;      
+      break;
     }
   }
 }
