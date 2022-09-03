@@ -3,10 +3,10 @@
 #include "wled.h"
 
 // predefs
-void file_handlePlayRecording();
-void file_loadRecording(const char *filepath, uint16_t startLed, uint16_t stopLed);
+void file_handlePlayPlayback();
+void file_loadPlayback(const char *filepath, uint16_t startLed, uint16_t stopLed);
 void file_playFrame();
-void tpm2_playNextRecordingFrame();
+void tpm2_playNextPlaybackFrame();
 
 
 #ifndef USED_STORAGE_FILESYSTEMS
@@ -64,7 +64,7 @@ static const String playback_formats[] = {"tpm2", "fseq","   "};
 class PlaybackRecordings : public Usermod
 {
 private:
-  String jsonKeyRecording = "playback";
+  String jsonKeyPlayback = "playback";
   String jsonKeyFilePath = "file";
   String jsonKeyPlaybackSegment = "seg";
   String jsonKeyPlaybackSegmentId = "id";
@@ -80,28 +80,28 @@ public:
 
   void loop()
   {
-    file_handlePlayRecording();
+    file_handlePlayPlayback();
   }
 
   void readFromJsonState(JsonObject &root)
   {
     DEBUG_PRINTF("[%s] load json\n", _name);
 
-    // check if recording keyword is contained in API-command (json)
+    // check if playback keyword is contained in API-command (json)
     // when a preset is fired it's normal to receive first the preset-firing ("ps":"<nr>]","time":"<UTC>")
     // followed by the specified API-Command of this preset
-    JsonVariant jsonRecordingEntry = root[jsonKeyRecording];
-    if (!jsonRecordingEntry.is<JsonObject>()) {
+    JsonVariant jsonPlaybackEntry = root[jsonKeyPlayback];
+    if (!jsonPlaybackEntry.is<JsonObject>()) {
       String debugOut;
       serializeJson(root, debugOut);
-      DEBUG_PRINTF("[%s] no '%s' key or wrong format: \"%s\"\n", _name, jsonKeyRecording.c_str(), debugOut.c_str());
+      DEBUG_PRINTF("[%s] no '%s' key or wrong format: \"%s\"\n", _name, jsonKeyPlayback.c_str(), debugOut.c_str());
       return;
     }
     
     // check if a mandatory path to the playback file exists in the API-command
-    const char *recording_path = jsonRecordingEntry[jsonKeyFilePath].as<const char *>();
-    String pathToRecording = recording_path;
-    if (!recording_path)
+    const char *playbackPath = jsonPlaybackEntry[jsonKeyFilePath].as<const char *>();
+    String pathToPlayback = playbackPath;
+    if (!playbackPath)
     {
       DEBUG_PRINTF("[%s] '%s' not defined\n", _name, jsonKeyFilePath.c_str());
       return;
@@ -109,7 +109,7 @@ public:
 
     // retrieve the segment(id) to play the recording on
     int id = -1; // segment id
-    JsonVariant jsonPlaybackSegment = jsonRecordingEntry[jsonKeyPlaybackSegment];
+    JsonVariant jsonPlaybackSegment = jsonPlaybackEntry[jsonKeyPlaybackSegment];
     if (jsonPlaybackSegment)
     { // playback on segments
       if      (jsonPlaybackSegment.is<JsonObject>())  { id = jsonPlaybackSegment[jsonKeyPlaybackSegmentId] | -1; }
@@ -119,7 +119,7 @@ public:
 
     // retrieve the recording format from the file extension    
     for(int i=0; i<PLAYBACK_FORMAT::COUNT_PLAYBACK_FORMATS; i++){
-      if(pathToRecording.endsWith(playback_formats[i])) {
+      if(pathToPlayback.endsWith(playback_formats[i])) {
         currentPlaybackFormat = (PLAYBACK_FORMAT) i;
         break;
       }
@@ -131,10 +131,10 @@ public:
       return;
     }
     
-    // load playback to defined segment on strip (file_loadRecording handles the different formats within (file_playFrame))
+    // load playback to defined segment on strip (file_loadPlayback handles the different formats within (file_playFrame))
     WS2812FX::Segment sg = strip.getSegment(id);
-    file_loadRecording(recording_path, sg.start, sg.stop);
-    DEBUG_PRINTF("[%s] play recording\n", _name);      
+    file_loadPlayback(playbackPath, sg.start, sg.stop);
+    DEBUG_PRINTF("[%s] start playback\n", _name);      
   }
 
   uint16_t getId()
@@ -161,21 +161,20 @@ const char PlaybackRecordings::_name[] PROGMEM = "Playback Recordings";
 #define REALTIME_MODE_PLAYBACK REALTIME_MODE_GENERIC
 
 // infinite loop of animation
-#define RECORDING_REPEAT_LOOP -1
+#define PLAYBACK_REPEAT_LOOP -1
 
 // Default repeat count, when not specified by preset (-1=loop, 0=play once, 2=repeat two times)
-#define RECORDING_REPEAT_DEFAULT 0
+#define PLAYBACK_REPEAT_DEFAULT 0
 
 
-File recordingFile;
+File playbackFile;
 uint16_t playbackLedStart = 0; // first led to play animation on
 uint16_t playbackLedStop  = 0; // led after the last led to play animation on
 uint8_t  colorData[4];
 uint8_t  colorChannels    = 3;
 uint32_t msFrameDelay     = 33; // time between frames
-int32_t  recordingRepeats = RECORDING_REPEAT_LOOP;
+int32_t  playbackRepeats = PLAYBACK_REPEAT_LOOP;
 unsigned long lastFrame   = 0;
-
 
 // clear the segment used by the playback
 void file_clearLastPlayback() { 
@@ -192,12 +191,12 @@ bool file_onFS(const char *filepath)
   return WLED_FS.exists(filepath);
 }
 
-void file_loadRecording(const char *filepath, uint16_t startLed, uint16_t stopLed)
+void file_loadPlayback(const char *filepath, uint16_t startLed, uint16_t stopLed)
 {  
   //close any potentially open file  
-  if(recordingFile.available()) {
+  if(playbackFile.available()) {
     file_clearLastPlayback();
-    recordingFile.close();
+    playbackFile.close();
   }
 
   playbackLedStart = startLed;
@@ -216,12 +215,12 @@ void file_loadRecording(const char *filepath, uint16_t startLed, uint16_t stopLe
   #ifdef SD_ADAPTER  
   if(file_onSD(filepath)){
     DEBUG_PRINTF("[%s] Read file from SD: %s\n", PlaybackRecordings::_name, filepath);
-    recordingFile = SD_ADAPTER.open(filepath, "rb");  
+    playbackFile = SD_ADAPTER.open(filepath, "rb");  
   } else 
   #endif
   if(file_onFS(filepath)) {
     DEBUG_PRINTF("[%s] Read file from FS: %s\n", PlaybackRecordings::_name, filepath);
-    recordingFile = WLED_FS.open(filepath, "rb");
+    playbackFile = WLED_FS.open(filepath, "rb");
   } else {
     DEBUG_PRINTF("[%s] File %s not found (%s)\n", PlaybackRecordings::_name, filepath, USED_STORAGE_FILESYSTEMS);
     return;
@@ -232,7 +231,7 @@ void file_loadRecording(const char *filepath, uint16_t startLed, uint16_t stopLe
       realtimeOverride = REALTIME_OVERRIDE_NONE;
   }
 
-  recordingRepeats = RECORDING_REPEAT_DEFAULT;
+  playbackRepeats = PLAYBACK_REPEAT_DEFAULT;
   file_playFrame();
 }
 
@@ -240,29 +239,30 @@ void file_loadRecording(const char *filepath, uint16_t startLed, uint16_t stopLe
 void file_skipUntil(uint8_t byteToStopAt)
 {
   uint8_t rb = 0;
-  do { rb = recordingFile.read(); }
-  while (recordingFile.available() && rb != byteToStopAt);
+  do { rb = playbackFile.read(); }
+  while (playbackFile.available() && rb != byteToStopAt);
 }
 
 bool file_stopBecauseAtTheEnd()
 {
-  //If recording reached end loop or stop playback
-  if (!recordingFile.available())
+  //If playback reached end loop or stop playback
+  if (!playbackFile.available())
   {
-    if (recordingRepeats == RECORDING_REPEAT_LOOP)
+    if (playbackRepeats == PLAYBACK_REPEAT_LOOP)
     {
-      recordingFile.seek(0); // go back the beginning of the recording
+      playbackFile.seek(0); // go back the beginning of the recording
     }
-    else if (recordingRepeats > 0)
+    else if (playbackRepeats > 0)
     {
-      recordingFile.seek(0); // go back the beginning of the recording
-      recordingRepeats--;
-      DEBUG_PRINTF("[%s] Repeat recordind again for: %d\n", PlaybackRecordings::_name, recordingRepeats);  
+      playbackFile.seek(0); // go back the beginning of the recording
+      playbackRepeats--;
+      DEBUG_PRINTF("[%s] Repeat playback again for: %d\n", PlaybackRecordings::_name, playbackRepeats);  
     }
     else
     {      
+      DEBUG_PRINTF("[%s] Stop playback\n", PlaybackRecordings::_name);  
       exitRealtime();
-      recordingFile.close();
+      playbackFile.close();
       file_clearLastPlayback();
       return true;
     }
@@ -274,13 +274,13 @@ bool file_stopBecauseAtTheEnd()
 void file_playFrame() {
   switch (currentPlaybackFormat)
   {
-    case PLAYBACK_FORMAT::TPM2:  tpm2_playNextRecordingFrame(); break;
+    case PLAYBACK_FORMAT::TPM2:  tpm2_playNextPlaybackFrame(); break;
     // Add case for each format
     default: break;
   }
 }
 
-void file_handlePlayRecording()
+void file_handlePlayPlayback()
 {
   if (realtimeMode != REALTIME_MODE_PLAYBACK) return;
   if ( millis() - lastFrame < msFrameDelay)   return;
@@ -314,35 +314,41 @@ void tpm2_SkipUntilNextPacket()  { file_skipUntil(TPM2_START); }
 
 void tpm2_SkipUntilEndOfPacket() { file_skipUntil(TPM2_END); }
 
+// reads the color data for one pixel
 void tpm2_GetNextColorData(uint8_t data[])
 {
-  data[0] = recordingFile.read();
-  data[1] = recordingFile.read();
-  data[2] = recordingFile.read();
+  data[0] = playbackFile.read();
+  data[1] = playbackFile.read();
+  data[2] = playbackFile.read();
   data[3] = 0; // TODO add RGBW mode to TPM2
 }
 
+// reads the next TPM2 packet length from two bytes
 uint16_t tpm2_getNextPacketLength()
 {
-  if (!recordingFile.available()) { return 0; }
-  uint8_t highbyte_size = recordingFile.read();
-  uint8_t lowbyte_size = recordingFile.read();
+  if (!playbackFile.available()) { return 0; }
+  uint8_t highbyte_size = playbackFile.read();
+  uint8_t lowbyte_size = playbackFile.read();
   uint16_t size = highbyte_size << 8 | lowbyte_size;
   return size;
 }
 
+// processes a TPM2 command, could be used for defining/changing framerate/channels in a recording
+// not implemented
 void tpm2_processCommandData()
 {
   DEBUG_PRINTF("[%s] tpm2_processCommandData: not implemented yet\n", PlaybackRecordings::_name);
   tpm2_SkipUntilNextPacket();
 }
 
+// processes a TPM2 response, not implented
 void tpm2_processResponseData()
 {
   DEBUG_PRINTF("[%s] tpm2_processResponseData: not implemented yet\n", PlaybackRecordings::_name);
   tpm2_SkipUntilNextPacket();
 }
 
+// processes the actual data frame (color data)
 void tpm2_processFrameData()
 {
   uint16_t packetLength = tpm2_getNextPacketLength(); // opt-TODO maybe stretch recording to available leds
@@ -369,22 +375,22 @@ void tpm2_processUnknownData(uint8_t data)
   tpm2_SkipUntilNextPacket();
 }
 
-// scan and forward until next frame was read (this will process commands)
-void tpm2_playNextRecordingFrame()
+// scan until next frame was read (this will process commands)
+void tpm2_playNextPlaybackFrame()
 {
   if(file_stopBecauseAtTheEnd()) return;
 
   uint8_t rb = 0; // last read byte from file
 
   // scan to next TPM2 packet start, should be the first attempt
-  do { rb = recordingFile.read(); } 
-  while (recordingFile.available() && rb != TPM2_START);  
-  if (!recordingFile.available()) { return; }
+  do { rb = playbackFile.read(); } 
+  while (playbackFile.available() && rb != TPM2_START);  
+  if (!playbackFile.available()) { return; }
 
   // process everything until (including) the next frame data
   while(true)
   {
-    rb = recordingFile.read();
+    rb = playbackFile.read();
     if     (rb == TPM2_COMMAND)    tpm2_processCommandData();     
     else if(rb == TPM2_RESPONSE)   tpm2_processResponseData();
     else if(rb != TPM2_DATA_FRAME) tpm2_processUnknownData(rb);
@@ -395,11 +401,12 @@ void tpm2_playNextRecordingFrame()
   }
 }
 
-void tpm2_printWholeRecording()
+// prints the whole recording to the debug log
+void tpm2_printWholePlayback()
 {
-  while (recordingFile.available())
+  while (playbackFile.available())
   {
-    uint8_t rb = recordingFile.read();
+    uint8_t rb = playbackFile.read();
 
     switch (rb)
     {
@@ -413,5 +420,5 @@ void tpm2_printWholeRecording()
     }
   }
 
-  recordingFile.close();
+  playbackFile.close();
 }
