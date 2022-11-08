@@ -53,7 +53,8 @@ void tpm2_playNextPlaybackFrame();
 // Default repeat count, when not specified by preset (-1=loop, 0=play once, 2=repeat two times)
 #define PLAYBACK_REPEAT_NEVER 0
 
-#define PLAYBACK_FRAME_DELAY 25
+// Set default framerate to 25 FPS
+#define PLAYBACK_FRAME_DELAY 40
 
 #ifndef USED_STORAGE_FILESYSTEMS
   #define USED_STORAGE_FILESYSTEMS "LittleFS (SD_CARD mod not active)"
@@ -188,7 +189,7 @@ public:
     }
 
     // load playback to defined segment on strip (file_loadPlayback handles the different formats within (file_playFrame))
-    WS2812FX::Segment sg = strip.getSegment(id);
+    Segment sg = strip.getSegment(id);
     file_loadPlayback(playbackPath, sg.start, sg.stop);
     DEBUG_PRINTF("[%s] start playback\n", _name);
   }
@@ -235,6 +236,18 @@ bool file_onFS(const char *filepath)
   return WLED_FS.exists(filepath);
 }
 
+//checks if an override was defined. If stop the playback
+void file_checkRealtimeOverride()
+{
+  if (realtimeOverride == REALTIME_OVERRIDE_ALWAYS) {
+    realtimeOverride = REALTIME_OVERRIDE_ONCE;
+  } else if(realtimeOverride == REALTIME_OVERRIDE_ONCE) { 
+    exitRealtime();
+    playbackFile.close();
+    file_clearLastPlayback();
+  }
+}
+
 void file_loadPlayback(const char *filepath, uint16_t startLed, uint16_t stopLed)
 {
   //close any potentially open file
@@ -248,7 +261,7 @@ void file_loadPlayback(const char *filepath, uint16_t startLed, uint16_t stopLed
 
   // No start/stop defined
   if(playbackLedStart == uint16_t(-1) || playbackLedStop == uint16_t(-1)) {
-    WS2812FX::Segment sg = strip.getSegment(-1);
+    Segment sg = strip.getSegment(-1);
 
     playbackLedStart = sg.start;
     playbackLedStop = sg.stop;
@@ -270,10 +283,6 @@ void file_loadPlayback(const char *filepath, uint16_t startLed, uint16_t stopLed
     return;
   }
 
-  if (realtimeOverride == REALTIME_OVERRIDE_ONCE)
-  {
-      realtimeOverride = REALTIME_OVERRIDE_NONE;
-  }
 
   file_playFrame();
 }
@@ -329,6 +338,7 @@ void file_handlePlayPlayback()
   if ( millis() - lastFrame < msFrameDelay)   return;
 
   file_playFrame();
+  file_checkRealtimeOverride();
 }
 
 //      ######## ########  ##     ##  #######

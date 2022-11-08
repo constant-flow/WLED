@@ -119,6 +119,10 @@ class UsermodSdCard : public Usermod {
       #endif
     }
 
+    void loop(){
+      
+    }
+
     uint16_t getId()
     {
       return USERMOD_ID_SD_CARD;
