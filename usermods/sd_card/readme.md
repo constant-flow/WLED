@@ -6,6 +6,10 @@
   1. via `-D WLED_USE_SD_MMC` when connected via MMC
   2. via `-D WLED_USE_SD_SPI` when connected via SPI (use usermod page to setup SPI pins)
 
+### Test
+- enable `-D SD_PRINT_HOME_DIR` and `-D WLED_DEBUG`
+- this will print all files in `/` on boot via serial
+
 ## Configuration
 ### MMC
 - The MMC port / pins needs no configuration as they are specified by Espressif

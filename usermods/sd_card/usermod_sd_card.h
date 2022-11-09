@@ -20,6 +20,8 @@
   SPIClass spiPort = SPIClass(VSPI);
 #endif
 
+void listDir( const char * dirname, uint8_t levels);
+
 class UsermodSdCard : public Usermod {
   private:
     bool sdInitDone = false;
@@ -117,6 +119,10 @@ class UsermodSdCard : public Usermod {
       #elif defined(WLED_USE_SD_MMC)
         init_SD_MMC();
       #endif
+ 
+      #if defined(SD_ADAPTER) && defined(SD_PRINT_HOME_DIR)  
+        listDir("/", 0);        
+      #endif
     }
 
     void loop(){
@@ -205,6 +211,33 @@ bool file_onSD(const char *filepath)
   }
 
   return false; // unknown card type
+}
+
+void listDir( const char * dirname, uint8_t levels){
+    DEBUG_PRINTF("Listing directory: %s\n", dirname);
+
+    File root = SD_ADAPTER.open(dirname);
+    if(!root){
+        DEBUG_PRINTF("Failed to open directory\n");
+        return;
+    }
+    if(!root.isDirectory()){
+        DEBUG_PRINTF("Not a directory\n");
+        return;
+    }
+
+    File file = root.openNextFile();
+    while(file){
+        if(file.isDirectory()){
+            DEBUG_PRINTF("  DIR : %s\n",file.name());
+            if(levels){
+                listDir(file.name(), levels -1);
+            }
+        } else {
+            DEBUG_PRINTF("  FILE: %s  SIZE: %d\n",file.name(), file.size());
+        }
+        file = root.openNextFile();
+    }
 }
 
 #endif
