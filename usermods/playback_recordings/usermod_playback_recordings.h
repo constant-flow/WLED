@@ -85,6 +85,8 @@ static const String playback_formats[] = {"tpm2",/*, "fseq"*/"   "};
 //      ##     ## ##    ## ##       ##    ##  ##     ## ##     ## ##     ##
 //       #######   ######  ######## ##     ## ##     ##  #######  ########
 
+static Segment *playbackSegment = nullptr;
+
 class PlaybackRecordings : public Usermod
 {
 private:
@@ -189,8 +191,15 @@ public:
     }
 
     // load playback to defined segment on strip (file_loadPlayback handles the different formats within (file_playFrame))
-    Segment sg = strip.getSegment(id);
-    file_loadPlayback(playbackPath, sg.start, sg.stop);
+    if(id != -1){ 
+      // a segment was specified
+      playbackSegment = &(strip.getSegment(id));
+      file_loadPlayback(playbackPath, playbackSegment->start, playbackSegment->start + playbackSegment->length());
+    } else {
+      // no segment was specified, use whole strip
+      playbackSegment = nullptr;
+      file_loadPlayback(playbackPath, 0, strip.getLengthTotal());
+    }
     DEBUG_PRINTF("[%s] start playback\n", _name);
   }
 
@@ -221,13 +230,17 @@ uint8_t  colorData[4];
 uint8_t  colorChannels    = 3;
 unsigned long lastFrame   = 0;
 
-// clear the segment used by the playback
+// clear the segment used by the playback and unload file/segment
 void file_clearLastPlayback() {
   for (uint16_t i = playbackLedStart; i < playbackLedStop; i++)
   {
     // tpm2_GetNextColorData(colorData);
     setRealtimePixel(i, 0,0,0,0);
   }
+
+  exitRealtime();
+  playbackFile.close();
+  playbackSegment = nullptr;
 }
 
 //checks if the file is available on LittleFS
@@ -242,8 +255,6 @@ void file_checkRealtimeOverride()
   if (realtimeOverride == REALTIME_OVERRIDE_ALWAYS) {
     realtimeOverride = REALTIME_OVERRIDE_ONCE;
   } else if(realtimeOverride == REALTIME_OVERRIDE_ONCE) { 
-    exitRealtime();
-    playbackFile.close();
     file_clearLastPlayback();
   }
 }
@@ -253,19 +264,11 @@ void file_loadPlayback(const char *filepath, uint16_t startLed, uint16_t stopLed
   //close any potentially open file
   if(playbackFile.available()) {
     file_clearLastPlayback();
-    playbackFile.close();
   }
 
   playbackLedStart = startLed;
   playbackLedStop = stopLed;
 
-  // No start/stop defined
-  if(playbackLedStart == uint16_t(-1) || playbackLedStop == uint16_t(-1)) {
-    Segment sg = strip.getSegment(-1);
-
-    playbackLedStart = sg.start;
-    playbackLedStop = sg.stop;
-  }
 
   DEBUG_PRINTF("[%s] Load animation on LED %d to %d\n", PlaybackRecordings::_name, playbackLedStart, playbackLedStop);
 
@@ -312,9 +315,7 @@ bool file_stopBecauseAtTheEnd()
     }
     else
     {
-      DEBUG_PRINTF("[%s] Stop playback\n", PlaybackRecordings::_name);
-      exitRealtime();
-      playbackFile.close();
+      DEBUG_PRINTF("[%s] Stop playback\n", PlaybackRecordings::_name);   
       file_clearLastPlayback();
       return true;
     }
@@ -339,6 +340,14 @@ void file_handlePlayPlayback()
 
   file_playFrame();
   file_checkRealtimeOverride();
+}
+
+void file_drawPixel(uint16_t i, byte r, byte g, byte b, byte w) {
+  if(playbackSegment && playbackSegment->is2D()) {    
+    playbackSegment->setPixelColor(i,RGBW32(r,g,b,w));
+  } else {
+    setRealtimePixel(i, r, g, b, w);
+  }
 }
 
 //      ######## ########  ##     ##  #######
@@ -410,7 +419,7 @@ void tpm2_processFrameData()
   for (uint16_t i = playbackLedStart; i < lastLed; i++)
   {
     tpm2_GetNextColorData(colorData);
-    setRealtimePixel(i, colorData[0], colorData[1], colorData[2], colorData[3]);
+    file_drawPixel(i, colorData[0], colorData[1], colorData[2], colorData[3]);
   }
 
   tpm2_SkipUntilEndOfPacket();
