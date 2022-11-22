@@ -101,113 +101,118 @@ private:
 public:
   static const char _name[];
 
-  void setup()
-  {
-    DEBUG_PRINTF("[%s] usermod loaded (storage: %s)\n", _name, USED_STORAGE_FILESYSTEMS);
-  }
-
-  void loop()
-  {
-    file_handlePlayPlayback();
-  }
-
-  void readFromJsonState(JsonObject &root)
-  {
-    DEBUG_PRINTF("[%s] load json\n", _name);
-
-    // check if playback keyword is contained in API-command (json)
-    // when a preset is fired it's normal to receive first the preset-firing ("ps":"<nr>]","time":"<UTC>")
-    // followed by the specified API-Command of this preset
-    JsonVariant jsonPlaybackEntry = root[jsonKeyPlayback];
-    if (!jsonPlaybackEntry.is<JsonObject>()) {
-      String debugOut;
-      serializeJson(root, debugOut);
-      DEBUG_PRINTF("[%s] no '%s' key or wrong format: \"%s\"\n", _name, jsonKeyPlayback.c_str(), debugOut.c_str());
-      return;
-    }
-
-    // check if a mandatory path to the playback file exists in the API-command
-    const char *playbackPath = jsonPlaybackEntry[jsonKeyFilePath].as<const char *>();
-    String pathToPlayback = playbackPath;
-    if (!playbackPath)
-    {
-      DEBUG_PRINTF("[%s] '%s' not defined\n", _name, jsonKeyFilePath.c_str());
-      return;
-    }
-
-    // retrieve the segment(id) to play the recording on
-    int id = -1; // segment id
-    JsonVariant jsonPlaybackSegment = jsonPlaybackEntry[jsonKeyPlaybackSegment];
-    if (jsonPlaybackSegment)
-    { // playback on segments
-      if      (jsonPlaybackSegment.is<JsonObject>())  { id = jsonPlaybackSegment[jsonKeyPlaybackSegmentId] | -1; }
-      else if (jsonPlaybackSegment.is<JsonInteger>()) { id = jsonPlaybackSegment; }
-      else { DEBUG_PRINTF("[%s] '%s' either as integer or as json with 'id':'integer'\n", _name, jsonKeyPlaybackSegment.c_str());};
-    }
-
-    // retrieve the recording format from the file extension
-    for(int i=0; i<PLAYBACK_FORMAT::COUNT_PLAYBACK_FORMATS; i++){
-      if(pathToPlayback.endsWith(playback_formats[i])) {
-        currentPlaybackFormat = (PLAYBACK_FORMAT) i;
-        break;
-      }
-    }
-
-    // check how often the playback should play
-    playbackRepeats = PLAYBACK_REPEAT_NEVER;
-    JsonVariant jsonPlaybackRepeats = jsonPlaybackEntry[jsonKeyPlaybackRepeats];
-    if (jsonPlaybackRepeats) {
-      if(jsonPlaybackRepeats.is<bool>()) {
-        bool doesLoop = jsonPlaybackRepeats;
-        DEBUG_PRINTF("[%s] repeats found as boolean: loop %d \n", _name, doesLoop);
-        playbackRepeats = doesLoop ? PLAYBACK_REPEAT_LOOP : PLAYBACK_REPEAT_NEVER;
-      } else if(jsonPlaybackRepeats.is<JsonInteger>()) {
-        int repeatCountInJson = jsonPlaybackRepeats;
-        DEBUG_PRINTF("[%s] repeats found as integer: repeat count %d\n", _name, repeatCountInJson);
-        playbackRepeats = repeatCountInJson;
-      } else {
-        DEBUG_PRINTF("[%s] %s either as true (loops forever) or as integer to specify count\n", _name, jsonKeyPlaybackRepeats.c_str());
-      }
-    }
-
-    //adjust the framerate if defined
-    msFrameDelay = PLAYBACK_FRAME_DELAY;
-    JsonVariant jsonPlaybackFps = jsonPlaybackEntry[jsonKeyFramesPerSecond];
-    if (jsonPlaybackFps) {
-      if(jsonPlaybackFps.is<JsonInteger>() || jsonPlaybackFps.is<JsonFloat>()) {
-        float fps = jsonPlaybackFps;
-        uint32_t newMsDelay = round(1000.f / fps);
-        DEBUG_PRINTF("[%s] framerate %d -> delay between frames: %d\n", _name, fps, newMsDelay);
-        msFrameDelay = newMsDelay;
-      } else {
-        DEBUG_PRINTF("[%s] %s either as integer or float, though delay will be in ms and integer always\n", _name, jsonKeyFramesPerSecond.c_str());
-      }
-    }
-
-    // stop here if the format is unknown
-    if(currentPlaybackFormat == PLAYBACK_FORMAT::FORMAT_UNKNOWN) {
-      DEBUG_PRINTF("[%s] unknown format ... if you read that, you can code the format you need XD\n", _name);
-      return;
-    }
-
-    // load playback to defined segment on strip (file_loadPlayback handles the different formats within (file_playFrame))
-    if(id != -1){ 
-      // a segment was specified
-      playbackSegment = &(strip.getSegment(id));
-      file_loadPlayback(playbackPath, playbackSegment->start, playbackSegment->start + playbackSegment->length());
-    } else {
-      // no segment was specified, use whole strip
-      playbackSegment = nullptr;
-      file_loadPlayback(playbackPath, 0, strip.getLengthTotal());
-    }
-    DEBUG_PRINTF("[%s] start playback\n", _name);
-  }
-
-  uint16_t getId()
-  {
-    return USERMOD_ID_PLAYBACK_RECORDINGS;
-  }
+  void setup();
+  void loop();
+  void readFromJsonState(JsonObject &root);
+  uint16_t getId();
 };
+
+void PlaybackRecordings::setup()
+{
+  DEBUG_PRINTF("[%s] usermod loaded (storage: %s)\n", _name, USED_STORAGE_FILESYSTEMS);
+}
+
+void PlaybackRecordings::loop()
+{
+  file_handlePlayPlayback();
+}
+
+void PlaybackRecordings::readFromJsonState(JsonObject &root)
+{
+  DEBUG_PRINTF("[%s] load json\n", _name);
+
+  // check if playback keyword is contained in API-command (json)
+  // when a preset is fired it's normal to receive first the preset-firing ("ps":"<nr>]","time":"<UTC>")
+  // followed by the specified API-Command of this preset
+  JsonVariant jsonPlaybackEntry = root[jsonKeyPlayback];
+  if (!jsonPlaybackEntry.is<JsonObject>()) {
+    String debugOut;
+    serializeJson(root, debugOut);
+    DEBUG_PRINTF("[%s] no '%s' key or wrong format: \"%s\"\n", _name, jsonKeyPlayback.c_str(), debugOut.c_str());
+    return;
+  }
+
+  // check if a mandatory path to the playback file exists in the API-command
+  const char *playbackPath = jsonPlaybackEntry[jsonKeyFilePath].as<const char *>();
+  String pathToPlayback = playbackPath;
+  if (!playbackPath)
+  {
+    DEBUG_PRINTF("[%s] '%s' not defined\n", _name, jsonKeyFilePath.c_str());
+    return;
+  }
+
+  // retrieve the segment(id) to play the recording on
+  int id = -1; // segment id
+  JsonVariant jsonPlaybackSegment = jsonPlaybackEntry[jsonKeyPlaybackSegment];
+  if (jsonPlaybackSegment)
+  { // playback on segments
+    if      (jsonPlaybackSegment.is<JsonObject>())  { id = jsonPlaybackSegment[jsonKeyPlaybackSegmentId] | -1; }
+    else if (jsonPlaybackSegment.is<JsonInteger>()) { id = jsonPlaybackSegment; }
+    else { DEBUG_PRINTF("[%s] '%s' either as integer or as json with 'id':'integer'\n", _name, jsonKeyPlaybackSegment.c_str());};
+  }
+
+  // retrieve the recording format from the file extension
+  for(int i=0; i<PLAYBACK_FORMAT::COUNT_PLAYBACK_FORMATS; i++){
+    if(pathToPlayback.endsWith(playback_formats[i])) {
+      currentPlaybackFormat = (PLAYBACK_FORMAT) i;
+      break;
+    }
+  }
+
+  // check how often the playback should play
+  playbackRepeats = PLAYBACK_REPEAT_NEVER;
+  JsonVariant jsonPlaybackRepeats = jsonPlaybackEntry[jsonKeyPlaybackRepeats];
+  if (jsonPlaybackRepeats) {
+    if(jsonPlaybackRepeats.is<bool>()) {
+      bool doesLoop = jsonPlaybackRepeats;
+      DEBUG_PRINTF("[%s] repeats found as boolean: loop %d \n", _name, doesLoop);
+      playbackRepeats = doesLoop ? PLAYBACK_REPEAT_LOOP : PLAYBACK_REPEAT_NEVER;
+    } else if(jsonPlaybackRepeats.is<JsonInteger>()) {
+      int repeatCountInJson = jsonPlaybackRepeats;
+      DEBUG_PRINTF("[%s] repeats found as integer: repeat count %d\n", _name, repeatCountInJson);
+      playbackRepeats = repeatCountInJson;
+    } else {
+      DEBUG_PRINTF("[%s] %s either as true (loops forever) or as integer to specify count\n", _name, jsonKeyPlaybackRepeats.c_str());
+    }
+  }
+
+  //adjust the framerate if defined
+  msFrameDelay = PLAYBACK_FRAME_DELAY;
+  JsonVariant jsonPlaybackFps = jsonPlaybackEntry[jsonKeyFramesPerSecond];
+  if (jsonPlaybackFps) {
+    if(jsonPlaybackFps.is<JsonInteger>() || jsonPlaybackFps.is<JsonFloat>()) {
+      float fps = jsonPlaybackFps;
+      uint32_t newMsDelay = round(1000.f / fps);
+      DEBUG_PRINTF("[%s] framerate %d -> delay between frames: %d\n", _name, fps, newMsDelay);
+      msFrameDelay = newMsDelay;
+    } else {
+      DEBUG_PRINTF("[%s] %s either as integer or float, though delay will be in ms and integer always\n", _name, jsonKeyFramesPerSecond.c_str());
+    }
+  }
+
+  // stop here if the format is unknown
+  if(currentPlaybackFormat == PLAYBACK_FORMAT::FORMAT_UNKNOWN) {
+    DEBUG_PRINTF("[%s] unknown format ... if you read that, you can code the format you need XD\n", _name);
+    return;
+  }
+
+  // load playback to defined segment on strip (file_loadPlayback handles the different formats within (file_playFrame))
+  if(id != -1){ 
+    // a segment was specified
+    playbackSegment = &(strip.getSegment(id));
+    file_loadPlayback(playbackPath, playbackSegment->start, playbackSegment->start + playbackSegment->length());
+  } else {
+    // no segment was specified, use whole strip
+    playbackSegment = nullptr;
+    file_loadPlayback(playbackPath, 0, strip.getLengthTotal());
+  }
+  DEBUG_PRINTF("[%s] start playback\n", _name);
+}
+
+uint16_t PlaybackRecordings::getId()
+{
+  return USERMOD_ID_PLAYBACK_RECORDINGS;
+}
 
 const char PlaybackRecordings::_name[] PROGMEM = "Playback Recordings";
 
