@@ -42,8 +42,10 @@
 
 void file_handlePlayPlayback();
 void file_loadPlayback(const char *filepath, uint16_t startLed, uint16_t stopLed);
-void file_playFrame();
-void tpm2_playNextPlaybackFrame();
+void file_loadFrame();
+void file_setBufferSize(uint16_t requiredBufferSize);
+void tpm2_loadNextPlaybackFrame();
+void file_drawPixel(uint16_t i, byte r, byte g, byte b, byte w);
 
 // MACROS
 
@@ -110,6 +112,7 @@ public:
 void PlaybackRecordings::setup()
 {
   DEBUG_PRINTF("[%s] usermod loaded (storage: %s)\n", _name, USED_STORAGE_FILESYSTEMS);
+  file_setBufferSize(strip.getLengthTotal());  
 }
 
 void PlaybackRecordings::loop()
@@ -196,7 +199,7 @@ void PlaybackRecordings::readFromJsonState(JsonObject &root)
     return;
   }
 
-  // load playback to defined segment on strip (file_loadPlayback handles the different formats within (file_playFrame))
+  // load playback to defined segment on strip (file_loadPlayback handles the different formats within (file_loadFrame))
   if(id != -1){ 
     // a segment was specified
     playbackSegment = &(strip.getSegment(id));
@@ -228,15 +231,72 @@ const char PlaybackRecordings::_name[] PROGMEM = "Playback Recordings";
 // Recording format agnostic functions to load and skim thru a
 // recording/playback file and control its related entities
 
+#define PLAYBACK_SUPPORTED_COLOR_CHANNELS 4
+
 File playbackFile;
 uint16_t playbackLedStart = 0; // first led to play animation on
 uint16_t playbackLedStop  = 0; // led after the last led to play animation on
-uint8_t  colorData[4];
+uint8_t  colorData[PLAYBACK_SUPPORTED_COLOR_CHANNELS];
 uint8_t  colorChannels    = 3;
 unsigned long lastFrame   = 0;
 
+// size of the playback buffer (buffer size in LEDs)
+uint16_t bufferSize;
+uint8_t* playbackBuffer = nullptr;
+uint8_t* buffer_playhead = nullptr; // pointer to the next loaded frame in buffer to play 
+uint8_t  playhead_pos = 0; //
+uint8_t  loadhead_pos = 0;
+uint8_t* buffer_loadhead = nullptr; // pointer to the frame in buffer to load to
+uint8_t buffer_windows = 2; // how many sections are in the buffer (one sections contains one frame), 2 for double buffering
+uint8_t buffer_windows_free = 0; // how many windows in the buffer are still to be loaded before playback starts
+uint8_t buffer_window_size = 0; // how large is a window
+uint8_t buffer_total_size = 0; // how large is the total buffer
+uint16_t buffer_loadedLeds = 0;
+
+// set the amount of LEDs which are addressed by the playback (1st frame)
+void file_setBufferSize(uint16_t requiredBufferSize)
+{
+  DEBUG_PRINTF("[%s] set buffer to %d\n", PlaybackRecordings::_name, requiredBufferSize);
+  bufferSize = requiredBufferSize;
+  buffer_window_size = bufferSize * PLAYBACK_SUPPORTED_COLOR_CHANNELS;
+  buffer_total_size = buffer_window_size * buffer_windows; // multiple buffer windows in one array
+  playbackBuffer = new uint8_t[buffer_total_size]();
+  for(int i=0;i<buffer_total_size; i++) playbackBuffer[i] = 0;
+}
+
+// called when a frame was loaded
+void file_frameLoaded(uint16_t ledsLoaded) {
+  if(buffer_windows_free > 0) buffer_windows_free --;
+
+  //move buffer_loadhead to next window, and back to beginning when passed the end
+  loadhead_pos++;
+  if(loadhead_pos >= buffer_windows) loadhead_pos = 0;
+  buffer_loadhead = playbackBuffer + loadhead_pos * buffer_window_size;
+  DEBUG_PRINTF("[%s] next load pos %d(%p)\n", PlaybackRecordings::_name, loadhead_pos, buffer_loadhead);
+
+  // how many leds are played to
+  buffer_loadedLeds = ledsLoaded;
+}
+
+// called when a frame was played
+void file_framePlayed()
+{
+  DEBUG_PRINTF("[%s] frame played\n", PlaybackRecordings::_name);
+  buffer_windows_free++;
+  
+  //move buffer_playhead to next window, and back to beginning when passed the end
+  playhead_pos++;
+  if(playhead_pos >= buffer_windows) playhead_pos = 0;
+  buffer_playhead = playbackBuffer + playhead_pos * buffer_window_size;
+  DEBUG_PRINTF("[%s] next play pos %d(%p)\n", PlaybackRecordings::_name,playhead_pos, buffer_playhead);
+
+  // buffer_playhead += buffer_window_size; //TODO: this creates panic
+  // if(buffer_playhead > playbackBuffer + buffer_total_size) buffer_playhead = playbackBuffer;
+}
+
 // clear the segment used by the playback and unload file/segment
-void file_clearLastPlayback() {
+void file_clearLastPlayback()
+{
   for (uint16_t i = playbackLedStart; i < playbackLedStop; i++)
   {
     // tpm2_GetNextColorData(colorData);
@@ -264,6 +324,13 @@ void file_checkRealtimeOverride()
   }
 }
 
+void file_resetBuffers() {
+  DEBUG_PRINTF("[%s] reset buffers\n", PlaybackRecordings::_name);
+  buffer_windows_free = buffer_windows;
+  buffer_loadhead = playbackBuffer;
+  buffer_playhead = playbackBuffer;
+}
+
 void file_loadPlayback(const char *filepath, uint16_t startLed, uint16_t stopLed)
 {
   //close any potentially open file
@@ -271,9 +338,10 @@ void file_loadPlayback(const char *filepath, uint16_t startLed, uint16_t stopLed
     file_clearLastPlayback();
   }
 
+  file_resetBuffers();
+
   playbackLedStart = startLed;
   playbackLedStop = stopLed;
-
 
   DEBUG_PRINTF("[%s] Load animation on LED %d to %d\n", PlaybackRecordings::_name, playbackLedStart, playbackLedStop);
 
@@ -291,8 +359,8 @@ void file_loadPlayback(const char *filepath, uint16_t startLed, uint16_t stopLed
     return;
   }
 
-
-  file_playFrame();
+  realtimeLock(realtimeTimeoutMs, REALTIME_MODE_PLAYBACK);
+  file_loadFrame();
 }
 
 // skips until a specific byte comes up
@@ -329,21 +397,42 @@ bool file_stopBecauseAtTheEnd()
   return false;
 }
 
-void file_playFrame() {
+void file_loadFrame() {
   switch (currentPlaybackFormat)
   {
-    case PLAYBACK_FORMAT::TPM2:  tpm2_playNextPlaybackFrame(); break;
+    case PLAYBACK_FORMAT::TPM2:  tpm2_loadNextPlaybackFrame(); break;
     // Add case for each format
     default: break;
   }
 }
 
+void file_playFrame(uint16_t loadedLeds)
+{
+  DEBUG_PRINTF("[%s] playFrame\n", PlaybackRecordings::_name);
+  uint8_t* address = buffer_playhead;
+  for(int i=0; i<loadedLeds; i++){
+    // file_drawPixel(i, colorData[0], colorData[1], colorData[2], colorData[3]);
+    file_drawPixel(i, address[0], address[1], address[2], address[3]);
+    address += PLAYBACK_SUPPORTED_COLOR_CHANNELS;
+    if(i%4 == 3) {
+
+    }
+  }
+
+  file_framePlayed();  
+  strip.show();
+  // tell ui we are playing the recording right now
+  realtimeLock(realtimeTimeoutMs, REALTIME_MODE_PLAYBACK);
+
+  lastFrame = millis();
+}
+
 void file_handlePlayPlayback()
 {
-  if (realtimeMode != REALTIME_MODE_PLAYBACK) return;
+  if (realtimeMode != REALTIME_MODE_PLAYBACK) return;  
+  if(buffer_windows_free > 0) file_loadFrame();
   if ( millis() - lastFrame < msFrameDelay)   return;
-
-  file_playFrame();
+  if(buffer_windows_free == 0) file_playFrame(buffer_loadedLeds);
   file_checkRealtimeOverride();
 }
 
@@ -421,19 +510,22 @@ void tpm2_processFrameData()
   uint16_t packetLength = tpm2_getNextPacketLength(); // opt-TODO maybe stretch recording to available leds
   uint16_t lastLed = min(playbackLedStop, uint16_t(playbackLedStart + packetLength));
 
+  uint8_t *address = buffer_loadhead;
+  DEBUG_PRINTF("\nFrame\n");
   for (uint16_t i = playbackLedStart; i < lastLed; i++)
   {
     tpm2_GetNextColorData(colorData);
-    file_drawPixel(i, colorData[0], colorData[1], colorData[2], colorData[3]);
+    address[0] = colorData[0];
+    address[1] = colorData[1];
+    address[2] = colorData[2];
+    address[3] = colorData[3];
+    address += PLAYBACK_SUPPORTED_COLOR_CHANNELS;
+    DEBUG_PRINTF("(%d,%d,%d)", colorData[0],colorData[1], colorData[2]);
   }
 
+  DEBUG_PRINTF("\n");
   tpm2_SkipUntilEndOfPacket();
-
-  strip.show();
-  // tell ui we are playing the recording right now
-  realtimeLock(realtimeTimeoutMs, REALTIME_MODE_PLAYBACK);
-
-  lastFrame = millis();
+  file_frameLoaded(lastLed - playbackLedStart);
 }
 
 void tpm2_processUnknownData(uint8_t data)
@@ -443,7 +535,7 @@ void tpm2_processUnknownData(uint8_t data)
 }
 
 // scan until next frame was read (this will process commands)
-void tpm2_playNextPlaybackFrame()
+void tpm2_loadNextPlaybackFrame()
 {
   if(file_stopBecauseAtTheEnd()) return;
 
