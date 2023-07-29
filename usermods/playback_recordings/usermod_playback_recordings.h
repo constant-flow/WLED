@@ -57,25 +57,25 @@ void tpm2_playNextPlaybackFrame();
 #define PLAYBACK_FRAME_DELAY 40
 
 #ifndef USED_STORAGE_FILESYSTEMS
-  #define USED_STORAGE_FILESYSTEMS "LittleFS (SD_CARD mod not active)"
+#define USED_STORAGE_FILESYSTEMS "LittleFS (SD_CARD mod not active)"
 #endif
 
-//TODO: maybe add as custom RT_MODE in `const.h` and `json.cpp`
+// TODO: maybe add as custom RT_MODE in `const.h` and `json.cpp`
 #define REALTIME_MODE_PLAYBACK REALTIME_MODE_GENERIC
 
-enum PLAYBACK_FORMAT {
-  TPM2=0,
+enum PLAYBACK_FORMAT
+{
+  TPM2 = 0,
   FSEQ,
   FORMAT_UNKNOWN,
   COUNT_PLAYBACK_FORMATS
-  };
+};
 
 enum PLAYBACK_FORMAT currentPlaybackFormat = PLAYBACK_FORMAT::FORMAT_UNKNOWN;
 
 int32_t playbackRepeats = PLAYBACK_REPEAT_LOOP;
-uint32_t msFrameDelay   = PLAYBACK_FRAME_DELAY; // time between frames
-static const String playback_formats[] = {"tpm2",/*, "fseq"*/"   "};
-
+uint32_t msFrameDelay = PLAYBACK_FRAME_DELAY; // time between frames
+static const String playback_formats[] = {"tpm2", /*, "fseq"*/ "   "};
 
 //      ##     ##  ######  ######## ########  ##     ##  #######  ########
 //      ##     ## ##    ## ##       ##     ## ###   ### ##     ## ##     ##
@@ -84,6 +84,8 @@ static const String playback_formats[] = {"tpm2",/*, "fseq"*/"   "};
 //      ##     ##       ## ##       ##   ##   ##     ## ##     ## ##     ##
 //      ##     ## ##    ## ##       ##    ##  ##     ## ##     ## ##     ##
 //       #######   ######  ######## ##     ## ##     ##  #######  ########
+
+static Segment *playbackSegment = nullptr;
 
 class PlaybackRecordings : public Usermod
 {
@@ -117,7 +119,8 @@ public:
     // when a preset is fired it's normal to receive first the preset-firing ("ps":"<nr>]","time":"<UTC>")
     // followed by the specified API-Command of this preset
     JsonVariant jsonPlaybackEntry = root[jsonKeyPlayback];
-    if (!jsonPlaybackEntry.is<JsonObject>()) {
+    if (!jsonPlaybackEntry.is<JsonObject>())
+    {
       String debugOut;
       serializeJson(root, debugOut);
       DEBUG_PRINTF("[%s] no '%s' key or wrong format: \"%s\"\n", _name, jsonKeyPlayback.c_str(), debugOut.c_str());
@@ -138,15 +141,26 @@ public:
     JsonVariant jsonPlaybackSegment = jsonPlaybackEntry[jsonKeyPlaybackSegment];
     if (jsonPlaybackSegment)
     { // playback on segments
-      if      (jsonPlaybackSegment.is<JsonObject>())  { id = jsonPlaybackSegment[jsonKeyPlaybackSegmentId] | -1; }
-      else if (jsonPlaybackSegment.is<JsonInteger>()) { id = jsonPlaybackSegment; }
-      else { DEBUG_PRINTF("[%s] '%s' either as integer or as json with 'id':'integer'\n", _name, jsonKeyPlaybackSegment.c_str());};
+      if (jsonPlaybackSegment.is<JsonObject>())
+      {
+        id = jsonPlaybackSegment[jsonKeyPlaybackSegmentId] | -1;
+      }
+      else if (jsonPlaybackSegment.is<JsonInteger>())
+      {
+        id = jsonPlaybackSegment;
+      }
+      else
+      {
+        DEBUG_PRINTF("[%s] '%s' either as integer or as json with 'id':'integer'\n", _name, jsonKeyPlaybackSegment.c_str());
+      };
     }
 
     // retrieve the recording format from the file extension
-    for(int i=0; i<PLAYBACK_FORMAT::COUNT_PLAYBACK_FORMATS; i++){
-      if(pathToPlayback.endsWith(playback_formats[i])) {
-        currentPlaybackFormat = (PLAYBACK_FORMAT) i;
+    for (int i = 0; i < PLAYBACK_FORMAT::COUNT_PLAYBACK_FORMATS; i++)
+    {
+      if (pathToPlayback.endsWith(playback_formats[i]))
+      {
+        currentPlaybackFormat = (PLAYBACK_FORMAT)i;
         break;
       }
     }
@@ -154,43 +168,65 @@ public:
     // check how often the playback should play
     playbackRepeats = PLAYBACK_REPEAT_NEVER;
     JsonVariant jsonPlaybackRepeats = jsonPlaybackEntry[jsonKeyPlaybackRepeats];
-    if (jsonPlaybackRepeats) {
-      if(jsonPlaybackRepeats.is<bool>()) {
+    if (jsonPlaybackRepeats)
+    {
+      if (jsonPlaybackRepeats.is<bool>())
+      {
         bool doesLoop = jsonPlaybackRepeats;
         DEBUG_PRINTF("[%s] repeats found as boolean: loop %d \n", _name, doesLoop);
         playbackRepeats = doesLoop ? PLAYBACK_REPEAT_LOOP : PLAYBACK_REPEAT_NEVER;
-      } else if(jsonPlaybackRepeats.is<JsonInteger>()) {
+      }
+      else if (jsonPlaybackRepeats.is<JsonInteger>())
+      {
         int repeatCountInJson = jsonPlaybackRepeats;
         DEBUG_PRINTF("[%s] repeats found as integer: repeat count %d\n", _name, repeatCountInJson);
         playbackRepeats = repeatCountInJson;
-      } else {
+      }
+      else
+      {
         DEBUG_PRINTF("[%s] %s either as true (loops forever) or as integer to specify count\n", _name, jsonKeyPlaybackRepeats.c_str());
       }
     }
 
-    //adjust the framerate if defined
+    // adjust the framerate if defined
     msFrameDelay = PLAYBACK_FRAME_DELAY;
     JsonVariant jsonPlaybackFps = jsonPlaybackEntry[jsonKeyFramesPerSecond];
-    if (jsonPlaybackFps) {
-      if(jsonPlaybackFps.is<JsonInteger>() || jsonPlaybackFps.is<JsonFloat>()) {
+    if (jsonPlaybackFps)
+    {
+      if (jsonPlaybackFps.is<JsonInteger>() || jsonPlaybackFps.is<JsonFloat>())
+      {
         float fps = jsonPlaybackFps;
         uint32_t newMsDelay = round(1000.f / fps);
         DEBUG_PRINTF("[%s] framerate %d -> delay between frames: %d\n", _name, fps, newMsDelay);
         msFrameDelay = newMsDelay;
-      } else {
+      }
+      else
+      {
         DEBUG_PRINTF("[%s] %s either as integer or float, though delay will be in ms and integer always\n", _name, jsonKeyFramesPerSecond.c_str());
       }
     }
 
     // stop here if the format is unknown
-    if(currentPlaybackFormat == PLAYBACK_FORMAT::FORMAT_UNKNOWN) {
+    if (currentPlaybackFormat == PLAYBACK_FORMAT::FORMAT_UNKNOWN)
+    {
       DEBUG_PRINTF("[%s] unknown format ... if you read that, you can code the format you need XD\n", _name);
       return;
     }
 
     // load playback to defined segment on strip (file_loadPlayback handles the different formats within (file_playFrame))
-    Segment sg = strip.getSegment(id);
-    file_loadPlayback(playbackPath, sg.start, sg.stop);
+    if (id != -1)
+    {
+      // a segment was specified
+      playbackSegment = &(strip.getSegment(id));
+      file_loadPlayback(playbackPath, playbackSegment->start, playbackSegment->start + playbackSegment->length());
+    }
+    else
+    {
+      // no segment was specified, use whole strip
+      playbackSegment = nullptr;
+      file_loadPlayback(playbackPath, 0, strip.getLengthTotal());
+    }
+
     DEBUG_PRINTF("[%s] start playback\n", _name);
   }
 
@@ -201,7 +237,6 @@ public:
 };
 
 const char PlaybackRecordings::_name[] PROGMEM = "Playback Recordings";
-
 
 //        ######## #### ##       ########
 //        ##        ##  ##       ##
@@ -216,73 +251,75 @@ const char PlaybackRecordings::_name[] PROGMEM = "Playback Recordings";
 
 File playbackFile;
 uint16_t playbackLedStart = 0; // first led to play animation on
-uint16_t playbackLedStop  = 0; // led after the last led to play animation on
-uint8_t  colorData[4];
-uint8_t  colorChannels    = 3;
-unsigned long lastFrame   = 0;
+uint16_t playbackLedStop = 0;  // led after the last led to play animation on
+uint8_t colorData[4];
+uint8_t colorChannels = 3;
+unsigned long lastFrame = 0;
 
 // clear the segment used by the playback
-void file_clearLastPlayback() {
+void file_clearLastPlayback()
+{
   for (uint16_t i = playbackLedStart; i < playbackLedStop; i++)
   {
     // tpm2_GetNextColorData(colorData);
-    setRealtimePixel(i, 0,0,0,0);
+    setRealtimePixel(i, 0, 0, 0, 0);
   }
+
+  exitRealtime();
+  playbackFile.close();
+  playbackSegment = nullptr;
 }
 
-//checks if the file is available on LittleFS
+// checks if the file is available on LittleFS
 bool file_onFS(const char *filepath)
 {
   return WLED_FS.exists(filepath);
 }
 
-//checks if an override was defined. If stop the playback
+// checks if an override was defined. If stop the playback
 void file_checkRealtimeOverride()
 {
-  if (realtimeOverride == REALTIME_OVERRIDE_ALWAYS) {
+  if (realtimeOverride == REALTIME_OVERRIDE_ALWAYS)
+  {
     realtimeOverride = REALTIME_OVERRIDE_ONCE;
-  } else if(realtimeOverride == REALTIME_OVERRIDE_ONCE) { 
-    exitRealtime();
-    playbackFile.close();
+  }
+  else if (realtimeOverride == REALTIME_OVERRIDE_ONCE)
+  {
     file_clearLastPlayback();
   }
 }
 
 void file_loadPlayback(const char *filepath, uint16_t startLed, uint16_t stopLed)
 {
-  //close any potentially open file
-  if(playbackFile.available()) {
+  // close any potentially open file
+  if (playbackFile.available())
+  {
     file_clearLastPlayback();
-    playbackFile.close();
   }
 
   playbackLedStart = startLed;
   playbackLedStop = stopLed;
 
-  // No start/stop defined
-  if(playbackLedStart == uint16_t(-1) || playbackLedStop == uint16_t(-1)) {
-    Segment sg = strip.getSegment(-1);
-
-    playbackLedStart = sg.start;
-    playbackLedStop = sg.stop;
-  }
-
   DEBUG_PRINTF("[%s] Load animation on LED %d to %d\n", PlaybackRecordings::_name, playbackLedStart, playbackLedStop);
 
-  #ifdef SD_ADAPTER
-  if(file_onSD(filepath)){
+#ifdef SD_ADAPTER
+  if (file_onSD(filepath))
+  {
     DEBUG_PRINTF("[%s] Read file from SD: %s\n", PlaybackRecordings::_name, filepath);
     playbackFile = SD_ADAPTER.open(filepath, "rb");
-  } else
-  #endif
-  if(file_onFS(filepath)) {
+  }
+  else
+#endif
+      if (file_onFS(filepath))
+  {
     DEBUG_PRINTF("[%s] Read file from FS: %s\n", PlaybackRecordings::_name, filepath);
     playbackFile = WLED_FS.open(filepath, "rb");
-  } else {
+  }
+  else
+  {
     DEBUG_PRINTF("[%s] File %s not found (%s)\n", PlaybackRecordings::_name, filepath, USED_STORAGE_FILESYSTEMS);
     return;
   }
-
 
   file_playFrame();
 }
@@ -291,13 +328,15 @@ void file_loadPlayback(const char *filepath, uint16_t startLed, uint16_t stopLed
 void file_skipUntil(uint8_t byteToStopAt)
 {
   uint8_t rb = 0;
-  do { rb = playbackFile.read(); }
-  while (playbackFile.available() && rb != byteToStopAt);
+  do
+  {
+    rb = playbackFile.read();
+  } while (playbackFile.available() && rb != byteToStopAt);
 }
 
 bool file_stopBecauseAtTheEnd()
 {
-  //If playback reached end loop or stop playback
+  // If playback reached end loop or stop playback
   if (!playbackFile.available())
   {
     if (playbackRepeats == PLAYBACK_REPEAT_LOOP)
@@ -313,8 +352,6 @@ bool file_stopBecauseAtTheEnd()
     else
     {
       DEBUG_PRINTF("[%s] Stop playback\n", PlaybackRecordings::_name);
-      exitRealtime();
-      playbackFile.close();
       file_clearLastPlayback();
       return true;
     }
@@ -323,22 +360,40 @@ bool file_stopBecauseAtTheEnd()
   return false;
 }
 
-void file_playFrame() {
+void file_playFrame()
+{
   switch (currentPlaybackFormat)
   {
-    case PLAYBACK_FORMAT::TPM2:  tpm2_playNextPlaybackFrame(); break;
-    // Add case for each format
-    default: break;
+  case PLAYBACK_FORMAT::TPM2:
+    tpm2_playNextPlaybackFrame();
+    break;
+  // Add case for each format
+  default:
+    break;
   }
 }
 
 void file_handlePlayPlayback()
 {
-  if (realtimeMode != REALTIME_MODE_PLAYBACK) return;
-  if ( millis() - lastFrame < msFrameDelay)   return;
+  if (realtimeMode != REALTIME_MODE_PLAYBACK)
+    return;
+  if (millis() - lastFrame < msFrameDelay)
+    return;
 
   file_playFrame();
   file_checkRealtimeOverride();
+}
+
+void file_drawPixel(uint16_t i, byte r, byte g, byte b, byte w)
+{
+  if (playbackSegment && playbackSegment->is2D())
+  {
+    playbackSegment->setPixelColor(i, RGBW32(r, g, b, w));
+  }
+  else
+  {
+    setRealtimePixel(i, r, g, b, w);
+  }
 }
 
 //      ######## ########  ##     ##  #######
@@ -355,15 +410,15 @@ void file_handlePlayPlayback()
 // - A frame contains the visual data (the LEDs color's) of one moment
 
 // --- CONSTANTS ---
-#define TPM2_START      0xC9
+#define TPM2_START 0xC9
 #define TPM2_DATA_FRAME 0xDA
-#define TPM2_COMMAND    0xC0
-#define TPM2_END        0x36
-#define TPM2_RESPONSE   0xAA
+#define TPM2_COMMAND 0xC0
+#define TPM2_END 0x36
+#define TPM2_RESPONSE 0xAA
 
 // --- Recording playback related ---
 
-void tpm2_SkipUntilNextPacket()  { file_skipUntil(TPM2_START); }
+void tpm2_SkipUntilNextPacket() { file_skipUntil(TPM2_START); }
 
 void tpm2_SkipUntilEndOfPacket() { file_skipUntil(TPM2_END); }
 
@@ -379,7 +434,10 @@ void tpm2_GetNextColorData(uint8_t data[])
 // reads the next TPM2 packet length from two bytes
 uint16_t tpm2_getNextPacketLength()
 {
-  if (!playbackFile.available()) { return 0; }
+  if (!playbackFile.available())
+  {
+    return 0;
+  }
   uint8_t highbyte_size = playbackFile.read();
   uint8_t lowbyte_size = playbackFile.read();
   uint16_t size = highbyte_size << 8 | lowbyte_size;
@@ -410,7 +468,7 @@ void tpm2_processFrameData()
   for (uint16_t i = playbackLedStart; i < lastLed; i++)
   {
     tpm2_GetNextColorData(colorData);
-    setRealtimePixel(i, colorData[0], colorData[1], colorData[2], colorData[3]);
+    file_drawPixel(i, colorData[0], colorData[1], colorData[2], colorData[3]);
   }
 
   tpm2_SkipUntilEndOfPacket();
@@ -431,23 +489,33 @@ void tpm2_processUnknownData(uint8_t data)
 // scan until next frame was read (this will process commands)
 void tpm2_playNextPlaybackFrame()
 {
-  if(file_stopBecauseAtTheEnd()) return;
+  if (file_stopBecauseAtTheEnd())
+    return;
 
   uint8_t rb = 0; // last read byte from file
 
   // scan to next TPM2 packet start, should be the first attempt
-  do { rb = playbackFile.read(); }
-  while (playbackFile.available() && rb != TPM2_START);
-  if (!playbackFile.available()) { return; }
-
-  // process everything until (including) the next frame data
-  while(true)
+  do
   {
     rb = playbackFile.read();
-    if     (rb == TPM2_COMMAND)    tpm2_processCommandData();
-    else if(rb == TPM2_RESPONSE)   tpm2_processResponseData();
-    else if(rb != TPM2_DATA_FRAME) tpm2_processUnknownData(rb);
-    else {
+  } while (playbackFile.available() && rb != TPM2_START);
+  if (!playbackFile.available())
+  {
+    return;
+  }
+
+  // process everything until (including) the next frame data
+  while (true)
+  {
+    rb = playbackFile.read();
+    if (rb == TPM2_COMMAND)
+      tpm2_processCommandData();
+    else if (rb == TPM2_RESPONSE)
+      tpm2_processResponseData();
+    else if (rb != TPM2_DATA_FRAME)
+      tpm2_processUnknownData(rb);
+    else
+    {
       tpm2_processFrameData();
       break;
     }
